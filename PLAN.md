@@ -505,6 +505,27 @@ export class PeopleOperations {
 //          /users/{id}/presence, /communications/presences
 ```
 
+#### `src/agent/graph/contacts.ts` — Full Contacts Experience (MISSING from CLI)
+
+```typescript
+export class ContactOperations {
+  // === CONTACTS ===
+  async listContacts(opts?: { top?, filter?, search? }): Promise<GraphResponse<Contact[]>>
+  async getContact(id: string): Promise<GraphResponse<Contact>>
+  async createContact(contact: {
+    givenName: string, surname?: string, emailAddresses?: EmailAddress[],
+    businessPhones?: string[], companyName?: string, jobTitle?: string
+  }): Promise<GraphResponse<Contact>>
+  async updateContact(id: string, updates: Partial<Contact>): Promise<GraphResponse<Contact>>
+  async deleteContact(id: string): Promise<GraphResponse<void>>
+
+  // === FOLDERS ===
+  async listContactFolders(): Promise<GraphResponse<ContactFolder[]>>
+  async createContactFolder(name: string): Promise<GraphResponse<ContactFolder>>
+}
+// Maps to: /me/contacts, /me/contactFolders
+```
+
 #### `src/agent/graph/search.ts` — Unified Search (most important tool)
 
 ```typescript
@@ -530,6 +551,7 @@ Same as before — handles field selection, pagination, truncation, token estima
 export { GraphClient } from './graph-client.js';
 export { MailOperations } from './graph/mail.js';
 export { CalendarOperations } from './graph/calendar.js';
+export { ContactOperations } from './graph/contacts.js';
 export { TeamsOperations } from './graph/teams.js';
 export { FileOperations } from './graph/files.js';
 export { TaskOperations } from './graph/tasks.js';
@@ -857,21 +879,33 @@ m365 spo site list --output json --query "[].{title:Title,url:Url,lastModified:L
 
 ## Current CLI Coverage vs Agent Needs
 
-| Domain | Existing Commands | Coverage for Agent | Key Gaps |
+| Domain | CLI Commands | Agent Needs (Graph Endpoints) | Coverage Gap |
 |---|---|---|---|
-| **Outlook (mail)** | 22 | Moderate | Missing: calendar CRUD, contacts, categories, focused inbox settings |
-| **Teams** | 73 | Good | Missing: transcript search, presence, meeting management |
-| **SharePoint** | 459 | Excellent | CLI's strongest area — perfect for admin/governance skills |
-| **OneDrive** | 8 (mostly reports) | Weak | Missing: file search, sharing, version management, folder CRUD |
-| **Planner** | ~15 | Good | Plan/bucket/task CRUD covered |
-| **To Do** | ~10 | Good | List/task CRUD covered |
-| **Entra ID** | 119 | Good | User/group/app management covered |
-| **Search** | 1 (unified) | Critical | Already supports exact same search surface as Copilot — **this is our #1 tool** |
-| **Insights** | 0 | Missing | No trending/used/shared files endpoints |
-| **People** | 0 | Missing | No people graph, org chart, relationship queries |
-| **Presence** | 0 | Missing | No user availability status |
+| **Outlook (mail)** | 22 | ~35 (messages, folders, attachments, categories, rules) | 37% — missing folders, categories, rules, attachments |
+| **Calendar** | 0 | ~28 (events, scheduling, rooms, reminders) | **100% gap** — entirely missing |
+| **Contacts** | 0 | ~16 (contacts, folders, photos) | **100% gap** — entirely missing |
+| **Teams** | 73 | ~40 (chats, channels, meetings, presence) | Good, but missing chats, presence, transcripts |
+| **SharePoint** | 459 | ~15 (sites, lists, items via Graph) | CLI covers MORE than Graph for SPO admin |
+| **OneDrive/Files** | 8 | ~35 (browse, upload, download, share, versions, insights) | 77% gap — mostly missing |
+| **Planner** | ~15 | ~15 (plans, buckets, tasks, details) | Good coverage |
+| **To Do** | ~10 | ~15 (lists, tasks, checklists, linked resources) | 67% coverage |
+| **People/Insights** | 0 | ~12 (people graph, presence, trending, used, shared) | **100% gap** — entirely missing |
+| **Search** | 1 | 1 (unified `/search/query`) | Covered — **same endpoint as Copilot** |
+| **TOTAL** | ~600 (but narrow) | **~200** (but complete human experience) | CLI goes deep in SPO/Entra; agent goes wide across daily use |
 
-**Strategy**: v1 works with what exists (plenty for mail, teams, sharepoint skills). v2 adds missing Graph endpoints for insights/people/presence.
+### Permission Scopes Required
+
+| Domain | Delegated Scopes |
+|---|---|
+| Email | `Mail.Read`, `Mail.ReadWrite`, `Mail.Send`, `MailboxSettings.ReadWrite` |
+| Calendar | `Calendars.Read`, `Calendars.ReadWrite`, `Calendars.Read.Shared` |
+| Contacts | `Contacts.Read`, `Contacts.ReadWrite` |
+| Teams | `Chat.Read`, `Chat.ReadWrite`, `ChatMessage.Send`, `ChannelMessage.Send`, `Team.ReadBasic.All`, `OnlineMeetings.ReadWrite`, `Presence.Read.All` |
+| Files | `Files.Read`, `Files.ReadWrite`, `Files.ReadWrite.All`, `Sites.Read.All` |
+| Tasks | `Tasks.Read`, `Tasks.ReadWrite`, `Group.Read.All` |
+| People | `People.Read`, `User.Read`, `User.Read.All` |
+
+**Strategy**: Build direct Graph API client covering all ~200 endpoints. Reuse CLI's auth (user runs `m365 login` once). CLI's 459 SharePoint admin commands remain available as fallback for deep SPO scenarios.
 
 ---
 
@@ -888,13 +922,14 @@ m365 spo site list --output json --query "[].{title:Title,url:Url,lastModified:L
 ### Step 2: Domain Modules (P0 — daily employee operations)
 | File | Purpose | Graph Endpoints |
 |---|---|---|
-| `src/agent/graph/mail.ts` | Full email experience | `/me/messages`, `/me/sendMail`, `/me/mailFolders` |
-| `src/agent/graph/calendar.ts` | Full calendar experience (NEW) | `/me/events`, `/me/calendarView`, `/me/findMeetingTimes` |
-| `src/agent/graph/teams.ts` | Full Teams experience | `/me/joinedTeams`, `/teams/*/channels/*/messages`, `/me/chats` |
-| `src/agent/graph/files.ts` | OneDrive + SharePoint files | `/me/drive`, `/sites/*/drive`, `/me/insights/*` |
-| `src/agent/graph/tasks.ts` | Planner + To Do | `/me/planner/plans`, `/me/todo/lists` |
-| `src/agent/graph/people.ts` | People + Presence (NEW) | `/me/people`, `/me/presence`, `/users/*` |
-| `src/agent/graph/search.ts` | Unified cross-M365 search | `POST /search/query` |
+| `src/agent/graph/mail.ts` | Full email (~35 endpoints) | `/me/messages`, `/me/sendMail`, `/me/mailFolders`, `/me/messages/*/attachments` |
+| `src/agent/graph/calendar.ts` | Full calendar (~28 endpoints, **NEW**) | `/me/events`, `/me/calendarView`, `/me/findMeetingTimes`, `/me/calendar/getSchedule` |
+| `src/agent/graph/contacts.ts` | Full contacts (~16 endpoints, **NEW**) | `/me/contacts`, `/me/contactFolders` |
+| `src/agent/graph/teams.ts` | Full Teams (~40 endpoints) | `/me/joinedTeams`, `/teams/*/channels/*/messages`, `/me/chats`, `/me/onlineMeetings` |
+| `src/agent/graph/files.ts` | OneDrive + SharePoint (~35 endpoints) | `/me/drive`, `/sites/*/drive`, `/me/insights/*`, permissions, versions |
+| `src/agent/graph/tasks.ts` | Planner + To Do (~30 endpoints) | `/me/planner/plans`, `/me/todo/lists`, checklists, linked resources |
+| `src/agent/graph/people.ts` | People + Presence (~12 endpoints, **NEW**) | `/me/people`, `/me/presence`, `/users/*`, `/me/manager`, `/me/directReports` |
+| `src/agent/graph/search.ts` | Unified cross-M365 search | `POST /search/query` (same as Copilot's #1 tool) |
 | + spec files for each | Tests | |
 
 ### Step 3: Agent CLI Commands
