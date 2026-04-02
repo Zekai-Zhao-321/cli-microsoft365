@@ -176,6 +176,50 @@ export class GraphClient {
     }
   }
 
+  public async put<T = any>(endpoint: string, body: any, headers?: Record<string, string>): Promise<GraphResponse<T>> {
+    try {
+      await this.ensureAuth();
+
+      const url = endpoint.startsWith('http') ? endpoint : this.buildUrl(endpoint);
+
+      const response = await request.put<string>({
+        url,
+        headers: {
+          accept: 'application/json',
+          'content-type': 'application/octet-stream',
+          ...headers
+        },
+        data: body,
+        responseType: 'json'
+      });
+
+      let parsed: any;
+      try {
+        parsed = typeof response === 'string' ? JSON.parse(response) : response;
+      }
+      catch {
+        parsed = {};
+      }
+
+      this.stripODataMetadata(parsed);
+
+      return {
+        success: true,
+        data: parsed,
+        tokenEstimate: this.estimateTokens(parsed)
+      };
+    }
+    catch (err: any) {
+      const agentError = this.translateError(err);
+      return {
+        success: false,
+        data: undefined as any,
+        tokenEstimate: 0,
+        error: agentError
+      };
+    }
+  }
+
   public async delete(endpoint: string): Promise<GraphResponse<any>> {
     try {
       await this.ensureAuth();
