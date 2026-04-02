@@ -115,29 +115,62 @@ From [Complete Guide to Building Skills](https://resources.anthropic.com/hubfs/T
 
 ## Architecture Overview
 
+### Why Direct Graph API, Not CLI Wrapper
+
+The original plan was to wrap cli-microsoft365's `executeCommand()`. But research revealed:
+- **CLI has major gaps**: Only 22 Outlook commands (no calendar, contacts, presence). Only 8 OneDrive commands. No insights/people endpoints.
+- **A human employee needs everything**: email, calendar, contacts, files, teams, tasks, people, presence — not just what the CLI supports
+- **CLI's command framework adds overhead**: argument parsing, Zod validation, telemetry — unnecessary for programmatic agent calls
+- **But CLI's auth is excellent**: MSAL integration, multi-cloud, token refresh, file persistence — all reusable
+
+**New approach**: Build a thin **Graph API client** that reuses CLI's auth layer directly.
+
 ```
-┌──────────────────────────────────────────────────────────┐
-│  AI Agent (Claude Code / Agent SDK / Any LLM)            │
-├──────────────────────────────────────────────────────────┤
-│  Claude Skills Pack (skills/m365-agent/)                  │
-│  ┌────────────┐ ┌────────────┐ ┌────────────────────┐    │
-│  │ m365-mail  │ │ m365-teams │ │ m365-sharepoint    │    │
-│  │ (sub-skill)│ │ (sub-skill)│ │ (sub-skill)        │    │
-│  └─────┬──────┘ └─────┬──────┘ └────────┬───────────┘    │
-│        └───────────────┴────────────────┘                │
-│                        │                                  │
-│  m365-navigator (router SKILL.md)                        │
-├──────────────────────────────────────────────────────────┤
-│  Agent Adapter Layer (src/agent/)                        │
-│  ┌──────────┐  ┌───────────┐  ┌──────────────┐          │
-│  │ executor │  │ discovery │  │  formatter   │          │
-│  └────┬─────┘  └─────┬─────┘  └──────┬───────┘          │
-├───────┴───────────────┴──────────────┴───────────────────┤
-│  Existing cli-microsoft365 (@pnp/cli-microsoft365)       │
-│  executeCommand() → Command → Microsoft Graph API / SPO  │
-│  Auth (MSAL)  │  Request  │  Output Formatting           │
-└──────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│  AI Agent (Claude Code / Agent SDK / Any LLM)               │
+├─────────────────────────────────────────────────────────────┤
+│  Claude Skills Pack (skills/m365-agent/)                     │
+│  ┌────────────┐ ┌────────────┐ ┌────────────────────┐       │
+│  │ m365-mail  │ │ m365-teams │ │ m365-sharepoint    │       │
+│  │ (sub-skill)│ │ (sub-skill)│ │ (sub-skill)        │       │
+│  └─────┬──────┘ └─────┬──────┘ └────────┬───────────┘       │
+│        └───────────────┴────────────────┘                   │
+│                        │                                     │
+│  m365-navigator (router SKILL.md)                           │
+├─────────────────────────────────────────────────────────────┤
+│  Agent Graph Client (src/agent/)                             │
+│  ┌──────────┐  ┌───────────┐  ┌──────────────┐              │
+│  │  graph/   │  │ discovery │  │  formatter   │              │
+│  │ mail.ts   │  │   .ts     │  │    .ts       │              │
+│  │ calendar  │  └───────────┘  └──────────────┘              │
+│  │ teams.ts  │                                               │
+│  │ files.ts  │  Intent-based operations that call             │
+│  │ tasks.ts  │  Graph API directly for FULL coverage          │
+│  │ people.ts │                                               │
+│  │ search.ts │                                               │
+│  └─────┬─────┘                                               │
+├────────┴────────────────────────────────────────────────────┤
+│  Reused from cli-microsoft365 (minimal extraction)           │
+│  ┌───────────┐  ┌────────────┐  ┌──────────────────┐        │
+│  │  Auth.ts  │  │ request.ts │  │ FileTokenStorage  │        │
+│  │  (1042 ln)│  │  (254 ln)  │  │  + msalCache      │        │
+│  └───────────┘  └────────────┘  └──────────────────┘        │
+│  Same login session — user runs `m365 login` once            │
+│  Both CLI and agent tools share the same tokens              │
+└─────────────────────────────────────────────────────────────┘
 ```
+
+### What We Reuse from CLI (3 files, ~1,300 lines total)
+| File | Lines | What It Does |
+|---|---|---|
+| `Auth.ts` | 1,042 | Token acquisition (8 auth flows), refresh, MSAL, multi-cloud, connection management |
+| `request.ts` | 254 | HTTP client with auto-auth injection, 429/503 retry, cloud URL rewriting |
+| `auth/FileTokenStorage.ts` | ~30 | Token persistence to disk (same files as CLI) |
+| `auth/msalCachePlugin.ts` | ~20 | MSAL cache hooks |
+| `utils/odata.ts` | ~50 | Automatic OData pagination (follows `@odata.nextLink`) |
+
+### What We Build New
+Intent-based Graph API operations covering the **full human employee experience** — everything a person does daily in M365, organized by domain.
 
 ---
 
@@ -210,139 +243,315 @@ Every error should be an actionable instruction the agent can follow:
 
 ---
 
-## Part 1: Agent Adapter Layer (`src/agent/`)
+## Part 1: Agent Graph Client (`src/agent/`)
 
-### 1.1 Agent Executor (`src/agent/executor.ts`)
+### 1.1 Core: Graph Client (`src/agent/graph-client.ts`)
 
-Thin wrapper around `executeCommand` with agent-optimized defaults:
+Thin wrapper over CLI's `request` module with agent-friendly defaults:
 
 ```typescript
-export interface AgentExecuteOptions {
-  command: string;              // e.g. "outlook mail list"
-  options?: Record<string, any>;
-  maxTokens?: number;           // default 4000, max 25000
-  page?: number;                // pagination (default 1)
-  pageSize?: number;            // items per page (default 10)
-  fields?: string[];            // select specific fields for token savings
-}
+import auth from '../Auth.js';
+import request from '../request.js';
 
-export interface AgentResult {
+export interface GraphResponse<T> {
   success: boolean;
-  data: any;                    // parsed JSON
-  totalCount?: number;          // for paginated results
+  data: T;
+  totalCount?: number;
   page?: number;
   hasMore?: boolean;
   error?: {
-    message: string;            // agent-readable error
-    code?: string;              // OData/Graph error code
-    suggestion?: string;        // actionable fix
+    message: string;
+    code?: string;
+    suggestion?: string;
   };
   tokenEstimate: number;
 }
 
-export async function agentExecute(opts: AgentExecuteOptions): Promise<AgentResult>
+export class GraphClient {
+  private resource = 'https://graph.microsoft.com';
+
+  // Ensure user is logged in (reuse CLI's auth)
+  async ensureAuth(): Promise<boolean> {
+    await auth.restoreAuth();
+    return auth.connection.active;
+  }
+
+  // Generic GET with pagination, field selection, token limits
+  async get<T>(endpoint: string, opts?: {
+    select?: string[];       // $select fields (token savings)
+    filter?: string;         // $filter OData expression
+    top?: number;            // $top page size (default 10)
+    skip?: number;           // $skip for pagination
+    orderBy?: string;        // $orderby
+    expand?: string;         // $expand for relationships
+    maxTokens?: number;      // truncate response
+  }): Promise<GraphResponse<T>>
+
+  // POST, PATCH, DELETE with confirmation support
+  async post<T>(endpoint: string, body: any): Promise<GraphResponse<T>>
+  async patch<T>(endpoint: string, body: any): Promise<GraphResponse<T>>
+  async delete(endpoint: string): Promise<GraphResponse<void>>
+
+  // Batch requests (up to 20 per call, Graph API limit)
+  async batch(requests: BatchRequest[]): Promise<BatchResponse[]>
+}
 ```
 
 **Key behaviors:**
-- Always forces `output: 'json'` (structured data for agents)
-- Applies field selection before returning (massive token savings)
-- Truncates responses exceeding `maxTokens` with `hasMore: true`
-- Translates OData/Graph errors into actionable messages:
-  - `"Access denied"` → `{ message: "...", suggestion: "Run 'm365 login' or check permissions for Mail.Read scope" }`
-  - `"Resource not found"` → `{ message: "...", suggestion: "Verify the ID/URL. Use 'outlook mail list' to find valid IDs" }`
-- Pagination wrapper for list commands
+- Reuses CLI's `auth.ensureAccessToken()` and `request` module directly
+- Builds OData query params from structured options (`$select`, `$filter`, `$top`)
+- Auto-strips `@odata.context`, `@odata.type`, `@odata.etag` metadata
+- Token estimation on response, truncation with `hasMore` indicator
+- Actionable error translation (same pattern as before)
 
-**Files to reuse:**
-- `src/api.ts` → `executeCommand()` (the foundation)
-- `src/utils/odata.ts` → `GraphResponseError` (error translation patterns)
-- `src/Command.ts:29-36` → `CommandError`, `CommandErrorWithOutput`
+### 1.2 Domain Modules — "The Human Employee's Toolkit"
 
-### 1.2 Command Discovery (`src/agent/discovery.ts`)
+Each module represents what a human employee does in that M365 app daily:
 
-Agents need to find the right command without browsing 600+ options:
+#### `src/agent/graph/mail.ts` — Full Outlook Email Experience
 
 ```typescript
-export interface CommandCatalogEntry {
-  name: string;               // "outlook mail list"
-  description: string;        // "Lists emails from a mailbox"
-  domain: string;             // "outlook"
-  requiredOptions: string[];  // ["--folder"]
-  optionalOptions: string[];  // ["--top", "--filter"]
-  examples: string[];         // 1-2 usage examples
-}
+export class MailOperations {
+  // === INBOX (what every employee does first thing in the morning) ===
+  async listInbox(opts?: { top?, filter?, select? }): Promise<GraphResponse<Message[]>>
+  async getMessage(id: string): Promise<GraphResponse<Message>>
+  async getUnreadCount(): Promise<GraphResponse<{ count: number }>>
 
-export function getCommandCatalog(domain?: string): CommandCatalogEntry[]
-export function searchCommands(query: string): CommandCatalogEntry[]
-export function getCommandHelp(commandName: string): string
+  // === COMPOSE (20-50 times per day) ===
+  async sendMail(to: string[], subject: string, body: string, opts?: {
+    cc?: string[], bcc?: string[], bodyType?: 'Text'|'HTML',
+    attachments?: { name: string, path: string }[],
+    importance?: 'low'|'normal'|'high'
+  }): Promise<GraphResponse<void>>
+  async replyToMessage(id: string, body: string): Promise<GraphResponse<void>>
+  async forwardMessage(id: string, to: string[], comment?: string): Promise<GraphResponse<void>>
+  async createDraft(to: string[], subject: string, body: string): Promise<GraphResponse<Message>>
+
+  // === ORGANIZE (triage workflow) ===
+  async moveMessage(id: string, folder: string): Promise<GraphResponse<void>>
+  async deleteMessage(id: string): Promise<GraphResponse<void>>
+  async markAsRead(id: string): Promise<GraphResponse<void>>
+  async flagMessage(id: string): Promise<GraphResponse<void>>
+  async categorizeMessage(id: string, categories: string[]): Promise<GraphResponse<void>>
+
+  // === SEARCH (15-30 min/day wasted finding emails) ===
+  async searchMail(query: string, opts?: { top?, from?, after?, before? }): Promise<GraphResponse<Message[]>>
+
+  // === FOLDERS ===
+  async listFolders(): Promise<GraphResponse<MailFolder[]>>
+  async createFolder(name: string, parentId?: string): Promise<GraphResponse<MailFolder>>
+
+  // === ATTACHMENTS ===
+  async listAttachments(messageId: string): Promise<GraphResponse<Attachment[]>>
+  async downloadAttachment(messageId: string, attachmentId: string, savePath: string): Promise<void>
+
+  // === BULK (Copilot CAN'T do this) ===
+  async bulkMove(filter: string, targetFolder: string): Promise<GraphResponse<{ moved: number }>>
+  async bulkMarkRead(filter: string): Promise<GraphResponse<{ updated: number }>>
+  async bulkDelete(filter: string): Promise<GraphResponse<{ deleted: number }>>
+}
+// Maps to: GET/POST /me/messages, /me/mailFolders, /me/sendMail, etc.
 ```
 
-**Key behaviors:**
-- Builds catalog from `CommandInfo` metadata + Zod schemas (existing data)
-- `searchCommands` does fuzzy match on name + description keywords
-- Domain filter returns only relevant commands (e.g., `domain: "teams"`)
-- Cached after first build (lazy initialization)
-- Output is minimal — just enough for the agent to pick the right tool
+#### `src/agent/graph/calendar.ts` — Full Calendar Experience (MISSING from CLI)
 
-**Files to reuse:**
-- `src/cli/CommandInfo.ts` → command metadata structure
-- `allCommands.json` / `allCommandsFull.json` → pre-built command index (from build step)
-- Command `.schema` (Zod) → option details
+```typescript
+export class CalendarOperations {
+  // === VIEW (employees check calendar constantly) ===
+  async listEvents(opts?: { startDate?, endDate?, top? }): Promise<GraphResponse<Event[]>>
+  async getEvent(id: string): Promise<GraphResponse<Event>>
+  async getToday(): Promise<GraphResponse<Event[]>>
+  async getThisWeek(): Promise<GraphResponse<Event[]>>
+
+  // === MANAGE (scheduling is daily) ===
+  async createEvent(event: {
+    subject: string, start: DateTime, end: DateTime,
+    attendees?: string[], location?: string, body?: string,
+    isOnlineMeeting?: boolean, recurrence?: Recurrence
+  }): Promise<GraphResponse<Event>>
+  async updateEvent(id: string, updates: Partial<Event>): Promise<GraphResponse<Event>>
+  async deleteEvent(id: string): Promise<GraphResponse<void>>
+
+  // === RESPOND (accept/decline is constant) ===
+  async acceptEvent(id: string, comment?: string): Promise<GraphResponse<void>>
+  async declineEvent(id: string, comment?: string): Promise<GraphResponse<void>>
+  async tentativelyAccept(id: string, comment?: string): Promise<GraphResponse<void>>
+
+  // === SCHEDULING (find free time) ===
+  async findMeetingTimes(attendees: string[], duration: string, opts?: {
+    startDate?, endDate?, isOrganizerOptional?
+  }): Promise<GraphResponse<MeetingTimeSuggestion[]>>
+  async getSchedule(users: string[], startDate: string, endDate: string): Promise<GraphResponse<Schedule[]>>
+}
+// Maps to: /me/events, /me/calendarView, /me/calendar/events, /me/findMeetingTimes, /me/calendar/getSchedule
+```
+
+#### `src/agent/graph/teams.ts` — Full Teams Experience
+
+```typescript
+export class TeamsOperations {
+  // === TEAMS & CHANNELS ===
+  async listMyTeams(): Promise<GraphResponse<Team[]>>
+  async listChannels(teamId: string): Promise<GraphResponse<Channel[]>>
+  async createTeam(name: string, opts?: { description?, template? }): Promise<GraphResponse<Team>>
+
+  // === MESSAGES (the main thing people do in Teams) ===
+  async listChannelMessages(teamId: string, channelId: string, opts?: { top? }): Promise<GraphResponse<ChatMessage[]>>
+  async sendChannelMessage(teamId: string, channelId: string, content: string): Promise<GraphResponse<ChatMessage>>
+  async replyToMessage(teamId: string, channelId: string, messageId: string, content: string): Promise<GraphResponse<ChatMessage>>
+
+  // === CHAT (1:1 and group) ===
+  async listChats(opts?: { top? }): Promise<GraphResponse<Chat[]>>
+  async listChatMessages(chatId: string, opts?: { top? }): Promise<GraphResponse<ChatMessage[]>>
+  async sendChatMessage(chatId: string, content: string): Promise<GraphResponse<ChatMessage>>
+
+  // === MEMBERS ===
+  async listMembers(teamId: string): Promise<GraphResponse<Member[]>>
+  async addMember(teamId: string, userId: string, role?: string): Promise<GraphResponse<void>>
+  async removeMember(teamId: string, membershipId: string): Promise<GraphResponse<void>>
+
+  // === MEETINGS ===
+  async listMeetings(): Promise<GraphResponse<OnlineMeeting[]>>
+  async getMeetingTranscript(meetingId: string): Promise<GraphResponse<string>>
+
+  // === GOVERNANCE (Copilot CAN'T do this) ===
+  async archiveTeam(teamId: string): Promise<GraphResponse<void>>
+  async listAllTeams(): Promise<GraphResponse<Team[]>>  // admin: find stale teams
+}
+// Maps to: /me/joinedTeams, /teams/{id}/channels, /teams/{id}/channels/{id}/messages,
+//          /me/chats, /me/chats/{id}/messages, /me/onlineMeetings
+```
+
+#### `src/agent/graph/files.ts` — Full OneDrive + SharePoint Files Experience
+
+```typescript
+export class FileOperations {
+  // === BROWSE (navigate file structure) ===
+  async listMyFiles(folderPath?: string, opts?: { top? }): Promise<GraphResponse<DriveItem[]>>
+  async listSiteFiles(siteUrl: string, folderPath?: string): Promise<GraphResponse<DriveItem[]>>
+  async getFileMetadata(driveId: string, itemId: string): Promise<GraphResponse<DriveItem>>
+
+  // === SEARCH (find files across M365) ===
+  async searchFiles(query: string, opts?: { top? }): Promise<GraphResponse<DriveItem[]>>
+
+  // === UPLOAD / DOWNLOAD ===
+  async uploadFile(folderPath: string, localPath: string, opts?: { siteUrl? }): Promise<GraphResponse<DriveItem>>
+  async downloadFile(driveId: string, itemId: string, savePath: string): Promise<void>
+
+  // === SHARE ===
+  async shareFile(driveId: string, itemId: string, opts: {
+    recipients: string[], type: 'view'|'edit', message?: string
+  }): Promise<GraphResponse<Permission>>
+  async listPermissions(driveId: string, itemId: string): Promise<GraphResponse<Permission[]>>
+
+  // === VERSIONS ===
+  async listVersions(driveId: string, itemId: string): Promise<GraphResponse<DriveItemVersion[]>>
+
+  // === INSIGHTS (trending/used/shared — MISSING from CLI entirely) ===
+  async getTrendingFiles(): Promise<GraphResponse<DriveItem[]>>
+  async getRecentFiles(): Promise<GraphResponse<DriveItem[]>>
+  async getSharedWithMe(): Promise<GraphResponse<DriveItem[]>>
+}
+// Maps to: /me/drive/root/children, /sites/{id}/drive, /me/drive/items/{id},
+//          /search/query, /me/insights/trending, /me/insights/used, /me/insights/shared
+```
+
+#### `src/agent/graph/tasks.ts` — Planner + To Do
+
+```typescript
+export class TaskOperations {
+  // === PLANNER ===
+  async listPlans(groupId: string): Promise<GraphResponse<Plan[]>>
+  async listBuckets(planId: string): Promise<GraphResponse<Bucket[]>>
+  async listTasks(planId: string, opts?: { bucketId? }): Promise<GraphResponse<PlannerTask[]>>
+  async createTask(planId: string, task: {
+    title: string, bucketId?: string, assignments?: string[],
+    dueDate?: string, priority?: number
+  }): Promise<GraphResponse<PlannerTask>>
+  async updateTask(taskId: string, updates: Partial<PlannerTask>): Promise<GraphResponse<void>>
+  async deleteTask(taskId: string): Promise<GraphResponse<void>>
+
+  // === TO DO ===
+  async listTodoLists(): Promise<GraphResponse<TodoList[]>>
+  async listTodoTasks(listId: string): Promise<GraphResponse<TodoTask[]>>
+  async createTodoTask(listId: string, title: string, opts?: {
+    dueDate?, body?, importance?
+  }): Promise<GraphResponse<TodoTask>>
+  async completeTodoTask(listId: string, taskId: string): Promise<GraphResponse<void>>
+}
+// Maps to: /me/planner/plans, /planner/plans/{id}/tasks, /me/todo/lists, /me/todo/lists/{id}/tasks
+```
+
+#### `src/agent/graph/people.ts` — People & Presence (MISSING from CLI entirely)
+
+```typescript
+export class PeopleOperations {
+  // === PEOPLE GRAPH (who do I work with?) ===
+  async getMyPeople(opts?: { top? }): Promise<GraphResponse<Person[]>>
+  async searchPeople(query: string): Promise<GraphResponse<Person[]>>
+  async getUser(userId: string): Promise<GraphResponse<User>>
+  async getManager(userId?: string): Promise<GraphResponse<User>>
+  async getDirectReports(userId?: string): Promise<GraphResponse<User[]>>
+
+  // === PRESENCE (is someone available?) ===
+  async getMyPresence(): Promise<GraphResponse<Presence>>
+  async getPresence(userId: string): Promise<GraphResponse<Presence>>
+  async setMyPresence(availability: string, activity: string): Promise<GraphResponse<void>>
+
+  // === PROFILE ===
+  async getMyProfile(): Promise<GraphResponse<User>>
+}
+// Maps to: /me/people, /users/{id}, /me/manager, /me/directReports, /me/presence,
+//          /users/{id}/presence, /communications/presences
+```
+
+#### `src/agent/graph/search.ts` — Unified Search (most important tool)
+
+```typescript
+export class SearchOperations {
+  // Unified search across ALL M365 content
+  async search(query: string, opts?: {
+    scopes?: ('message'|'event'|'driveItem'|'listItem'|'chatMessage'|'person'|'site')[],
+    top?: number,
+    from?: string,       // entity type filter
+    after?: string,      // date filter
+  }): Promise<GraphResponse<SearchResult[]>>
+}
+// Maps to: POST /search/query — the SAME endpoint Copilot uses internally
+```
 
 ### 1.3 Token-Aware Formatter (`src/agent/formatter.ts`)
 
-```typescript
-export function formatForAgent(data: any, opts: {
-  maxTokens?: number;       // default 4000
-  fields?: string[];        // field whitelist
-  page?: number;
-  pageSize?: number;
-}): {
-  formatted: any;
-  tokenEstimate: number;
-  truncated: boolean;
-  totalCount?: number;
-}
-```
+Same as before — handles field selection, pagination, truncation, token estimation.
 
-**Key behaviors:**
-- Token estimation: `~4 chars per token` heuristic
-- Field selection: only return requested properties from objects/arrays
-- Array pagination: slice by `page`/`pageSize`, return `totalCount`
-- Large string truncation: email bodies, HTML content → `"[truncated - 12,400 chars. Use 'outlook mail get --id <id>' for full content]"`
-- Strip internal metadata fields (`@odata.context`, `@odata.type`, etc.)
-
-### 1.4 Public API (`src/agent/index.ts`)
+### 1.4 Entry Point (`src/agent/index.ts`)
 
 ```typescript
-// Programmatic imports
-export { agentExecute, AgentExecuteOptions, AgentResult } from './executor.js';
-export { getCommandCatalog, searchCommands, getCommandHelp, CommandCatalogEntry } from './discovery.js';
+export { GraphClient } from './graph-client.js';
+export { MailOperations } from './graph/mail.js';
+export { CalendarOperations } from './graph/calendar.js';
+export { TeamsOperations } from './graph/teams.js';
+export { FileOperations } from './graph/files.js';
+export { TaskOperations } from './graph/tasks.js';
+export { PeopleOperations } from './graph/people.js';
+export { SearchOperations } from './graph/search.js';
 export { formatForAgent } from './formatter.js';
 ```
 
-**Package.json addition:**
-```json
-{
-  "exports": {
-    ".": "./dist/api.js",
-    "./agent": "./dist/agent/index.js"
-  }
-}
-```
+### 1.5 CLI Commands (optional convenience layer)
 
-### 1.5 Agent CLI Commands (`src/m365/agent/`)
-
-Register as first-class m365 commands so agents can use them via bash:
+The agent tools are also exposed as CLI commands for bash-based agents:
 
 ```bash
-# Discover available commands
-m365 agent catalog --domain outlook --output json
-
-# Search for a command by intent
-m365 agent search --query "send email with attachment" --output json
-
-# Execute with agent-optimized output
-m365 agent execute --command "outlook mail list" --options '{"top":5}' --fields "subject,from,receivedDateTime" --maxTokens 4000
+# These call Graph API directly, not through the CLI command framework
+m365 agent mail list --top 10 --select "subject,from,receivedDateTime"
+m365 agent mail send --to "user@company.com" --subject "Hello" --body "Hi there"
+m365 agent calendar today
+m365 agent calendar create --subject "Standup" --start "2026-04-03T09:00" --end "2026-04-03T09:30" --attendees "team@company.com"
+m365 agent teams messages --team "Engineering" --channel "General" --top 20
+m365 agent files search --query "quarterly report"
+m365 agent people search --query "Sarah"
+m365 agent search --query "budget proposal" --scopes "message,driveItem"
 ```
 
 ---
@@ -668,42 +877,55 @@ m365 spo site list --output json --query "[].{title:Title,url:Url,lastModified:L
 
 ## Part 3: Implementation Steps (Ordered)
 
-### Step 1: Agent Adapter Core (src/agent/)
+### Step 1: Graph Client Foundation
 | File | Purpose |
 |---|---|
-| `src/agent/formatter.ts` | Token-aware formatting (no deps on other new files) |
-| `src/agent/discovery.ts` | Command catalog and search |
-| `src/agent/executor.ts` | Main agent execution wrapper |
-| `src/agent/index.ts` | Public API exports |
+| `src/agent/graph-client.ts` | Core Graph API client (reuses Auth.ts + request.ts) |
+| `src/agent/formatter.ts` | Token-aware response formatting |
+| `src/agent/graph-client.spec.ts` | Tests with mocked auth/request |
 | `src/agent/formatter.spec.ts` | Formatter tests |
-| `src/agent/discovery.spec.ts` | Discovery tests |
-| `src/agent/executor.spec.ts` | Executor tests |
 
-### Step 2: Agent CLI Commands (src/m365/agent/)
+### Step 2: Domain Modules (P0 — daily employee operations)
+| File | Purpose | Graph Endpoints |
+|---|---|---|
+| `src/agent/graph/mail.ts` | Full email experience | `/me/messages`, `/me/sendMail`, `/me/mailFolders` |
+| `src/agent/graph/calendar.ts` | Full calendar experience (NEW) | `/me/events`, `/me/calendarView`, `/me/findMeetingTimes` |
+| `src/agent/graph/teams.ts` | Full Teams experience | `/me/joinedTeams`, `/teams/*/channels/*/messages`, `/me/chats` |
+| `src/agent/graph/files.ts` | OneDrive + SharePoint files | `/me/drive`, `/sites/*/drive`, `/me/insights/*` |
+| `src/agent/graph/tasks.ts` | Planner + To Do | `/me/planner/plans`, `/me/todo/lists` |
+| `src/agent/graph/people.ts` | People + Presence (NEW) | `/me/people`, `/me/presence`, `/users/*` |
+| `src/agent/graph/search.ts` | Unified cross-M365 search | `POST /search/query` |
+| + spec files for each | Tests | |
+
+### Step 3: Agent CLI Commands
 | File | Purpose |
 |---|---|
 | `src/m365/agent/commands.ts` | Command name constants |
-| `src/m365/agent/commands/agent-execute.ts` | `m365 agent execute` |
+| `src/m365/agent/commands/agent-mail.ts` | `m365 agent mail <action>` |
+| `src/m365/agent/commands/agent-calendar.ts` | `m365 agent calendar <action>` |
+| `src/m365/agent/commands/agent-teams.ts` | `m365 agent teams <action>` |
+| `src/m365/agent/commands/agent-files.ts` | `m365 agent files <action>` |
 | `src/m365/agent/commands/agent-search.ts` | `m365 agent search` |
-| `src/m365/agent/commands/agent-catalog.ts` | `m365 agent catalog` |
-| + spec files for each | Tests |
 
-### Step 3: Skills Pack (skills/)
+### Step 4: Skills Pack
 | File | Purpose |
 |---|---|
-| `skills/m365-agent/SKILL.md` | Navigator/router |
-| `skills/m365-agent/references/command-cheatsheet.md` | Quick reference |
-| `skills/m365-agent/references/auth-troubleshooting.md` | Auth help |
-| `skills/m365-agent/sub-skills/m365-mail/SKILL.md` | Mail workflows |
-| `skills/m365-agent/sub-skills/m365-mail/references/outlook-commands.md` | Full reference |
+| `skills/m365-agent/SKILL.md` | Navigator/router skill |
+| `skills/m365-agent/references/command-cheatsheet.md` | Quick reference for all agent commands |
+| `skills/m365-agent/references/auth-troubleshooting.md` | Auth issues & fixes |
+| `skills/m365-agent/references/cross-app-workflows.md` | Multi-service recipes |
+| `skills/m365-agent/sub-skills/m365-mail/SKILL.md` | Mail + Calendar workflows |
+| `skills/m365-agent/sub-skills/m365-mail/references/outlook-commands.md` | Full mail/calendar reference |
 | `skills/m365-agent/sub-skills/m365-teams/SKILL.md` | Teams workflows |
-| `skills/m365-agent/sub-skills/m365-teams/references/teams-commands.md` | Full reference |
-| `skills/m365-agent/sub-skills/m365-sharepoint/SKILL.md` | SharePoint workflows |
-| `skills/m365-agent/sub-skills/m365-sharepoint/references/sharepoint-commands.md` | Full reference |
+| `skills/m365-agent/sub-skills/m365-teams/references/teams-commands.md` | Full Teams reference |
+| `skills/m365-agent/sub-skills/m365-sharepoint/SKILL.md` | SharePoint + Files workflows |
+| `skills/m365-agent/sub-skills/m365-sharepoint/references/sharepoint-commands.md` | Full SharePoint reference |
 
-### Step 4: Integration
+### Step 5: Integration & Publishing
 - Add `"./agent"` export to `package.json`
-- Add agent type declarations to `src/api.d.ts`
+- Add type declarations for agent module
+- Prerequisites in each skill for installation
+- Publish skills pack as standalone GitHub repo
 
 ---
 
@@ -759,14 +981,35 @@ m365 agent execute --command "outlook mail list" --options '{"top":3}' --fields 
 
 ## Key Existing Files (Reference)
 
-| File | What to reuse |
+### Files We Directly Reuse (the auth/request core)
+| File | Lines | What It Does | How We Use It |
+|---|---|---|---|
+| `src/Auth.ts` | 1,042 | Token acquisition (8 auth flows), MSAL, multi-cloud | Import `auth` singleton, call `ensureAccessToken()` |
+| `src/request.ts` | 254 | HTTP client, auto-auth injection, throttle retry | Import `request`, call `get/post/patch/delete()` |
+| `src/auth/FileTokenStorage.ts` | ~30 | Token persistence to OS-specific location | Tokens persist between sessions |
+| `src/auth/msalCachePlugin.ts` | ~20 | MSAL cache hooks | Refresh tokens survive restarts |
+| `src/auth/MsalNetworkClient.ts` | ~40 | Custom network client for MSAL | Used internally by Auth |
+| `src/utils/odata.ts` | ~50 | OData pagination (`@odata.nextLink` following) | `getAllItems()` for paginated Graph responses |
+| `src/utils/accessToken.ts` | ~80 | JWT payload parsing (tenant, user, app-only check) | Token validation in agent layer |
+
+### Files We Reference But Don't Import
+| File | Why We Reference It |
 |---|---|
-| `src/api.ts` | `executeCommand()` — the foundation |
-| `src/Command.ts` | Base class, output formatting (lines 603-730), `CommandError` |
-| `src/cli/cli.ts` | `loadAllCommandsInfo()`, `executeCommandWithOutput()` |
-| `src/cli/CommandInfo.ts` | Command metadata structure |
-| `src/utils/odata.ts` | `GraphResponseError` for error translation |
-| `src/settingsNames.ts` | Configuration keys |
-| `src/Auth.ts` | Authentication (reuse as-is, ~1100 lines) |
-| `src/request.ts` | HTTP client (reuse as-is) |
-| `src/chili/chili.ts` | Keeping as-is (different purpose) |
+| `src/Command.ts` | Understand error patterns to replicate in agent layer |
+| `src/m365/base/GraphCommand.ts` | Understand Graph API URL patterns |
+| `src/m365/commands/login.ts` | Understand login flow (agent relies on `m365 login`) |
+| `src/chili/chili.ts` | Keeping as-is (different purpose: human doc Q&A) |
+
+### Auth Flow: How `m365 login` → Agent Tools Share Sessions
+```
+User runs: m365 login
+  → Auth.ts acquires token via device code flow
+  → Token stored in FileTokenStorage (~/.config/configstore/.cli-m365-connection.json)
+  → MSAL cache stored in ~/.config/configstore/.cli-m365-msal.json
+
+Agent tool runs: new GraphClient().ensureAuth()
+  → auth.restoreAuth() loads SAME token files
+  → auth.ensureAccessToken('https://graph.microsoft.com') refreshes if needed
+  → request.get() injects Bearer token automatically
+  → Same session, zero extra auth setup
+```
