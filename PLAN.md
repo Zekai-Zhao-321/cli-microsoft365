@@ -12,6 +12,61 @@ The AI agent ecosystem has shifted decisively toward CLI-first tooling:
 
 Sources: [MCP is Dead; Long Live MCP!](https://chrlschn.dev/blog/2026/03/mcp-is-dead-long-live-mcp/), [Why CLI Tools Are Beating MCP](https://jannikreinhard.com/2026/02/22/why-cli-tools-are-beating-mcp-for-ai-agents/), [MCP vs CLI Benchmark](https://www.scalekit.com/blog/mcp-vs-cli-use)
 
+### How People Actually Use M365 (Daily Pain Points)
+
+#### Outlook (Email) — 2.5-4 hours/day, 120-150 emails/day
+| Daily Task | Pain Level | What Copilot Does | What Copilot Misses |
+|---|---|---|---|
+| **Inbox triage** (scan, flag, archive) | Very High | Prioritization, thread summaries | Bulk operations ("archive all newsletters >7 days"), smart rules |
+| **Reading long threads** (15-30+ messages) | Very High | Thread summarization (best feature) | Cross-thread correlation, decision tracking |
+| **Composing replies** (20-50/day) | High | Draft generation, tone coaching | Template library with smart matching |
+| **Searching for old emails** | High | Natural language Q&A over mailbox | Reliable search, attachment finding |
+| **Follow-up tracking** ("awaiting reply") | High | Action item extraction (one-shot) | Persistent tracking, auto-reminders, accountability dashboard |
+| **Cross-app workflows** (email→SharePoint→Teams) | Medium | None | "Save attachment to project SharePoint and notify team in Teams" |
+| **Bulk operations** | Medium | None | "Categorize all emails from this project", batch move/archive |
+
+#### Teams — 50-200+ unread messages/day
+| Daily Task | Pain Level | What Copilot Does | What Copilot Misses |
+|---|---|---|---|
+| **Catching up on chat/channels** | Very High | Chat/channel summaries, catch-up | Cross-team daily digest, proactive "you missed something important" |
+| **Finding old messages/files** | Very High | Natural language search | Reliable search within date ranges, across chats |
+| **Post-meeting action items** | High | Extract action items from transcript | Auto-create Planner/To-Do tasks from action items |
+| **Team/channel sprawl** | High | None | Identify stale teams, suggest archiving, governance |
+| **Cross-app context switching** | High | Some cross-Graph queries | Unified project view across Teams+SharePoint+Planner |
+| **Scheduling meetings** | Medium | "Find a time" | Optimal scheduling, "this could be async" suggestions |
+
+#### SharePoint — Document management backbone
+| Daily Task | Pain Level | What Copilot Does | What Copilot Misses |
+|---|---|---|---|
+| **Finding documents** | Very High | Doc Q&A, natural language search | Reliable search, cross-library discovery |
+| **Permissions management** | Very High | None | "Who has access to X?", audit reports, fix broken inheritance |
+| **Content sprawl/governance** | Very High | None | Identify orphaned sites, enforce naming, lifecycle management |
+| **Bulk operations** (move, rename, tag) | High | None | Bulk metadata update, bulk move between libraries |
+| **Workflows/approvals** | High | None | Natural language workflow creation (Power Automate gap) |
+| **Version management** | Medium | None | Version comparison, cleanup old versions |
+| **Admin reporting** (storage, sharing, compliance) | Medium | None | Tenant-wide reports, external sharing audit |
+
+### Microsoft Copilot Architecture (Reverse-Engineered)
+
+Copilot internally is: **Graph API tool wrappers + Semantic Index (RAG) + LLM orchestrator**
+
+Its "tools" map to Graph API endpoints. Key architecture insights:
+- **`/search/query`** is the single most important endpoint (unified search across mail, files, chats, people, events)
+- **80% reads, 20% writes** — most interactions are "find/list/summarize", not "create/update/delete"
+- **Cross-app scenarios** are highest value: meeting prep (calendar→attendees→files→emails), meeting follow-up (transcript→tasks→email)
+- **Copilot Studio pre-built actions** reveal what Microsoft considers most important: get email summary, draft reply, find meeting times, get meeting recap, search files, get file summary, create task, get user profile
+
+**Where CLI agents beat Copilot:**
+| CLI Advantage | Why It Matters |
+|---|---|
+| Bulk/batch operations | Copilot handles one item at a time; CLI can script thousands |
+| Admin operations | Copilot is end-user only; CLI has SPO admin, Entra admin, Teams admin |
+| Automation/scheduling | Copilot is interactive only; CLI can be cron/CI/CD |
+| Transparency | Copilot is black-box; CLI shows every command |
+| Composability | Copilot outputs text; CLI outputs JSON, pipes, composes |
+| Cross-tenant | Copilot is single-tenant; CLI switches connections |
+| Developer workflows | SPFx, app registrations, Power Platform admin |
+
 ### Anthropic's Tool Design Principles
 From [Writing Tools for Agents](https://www.anthropic.com/engineering/writing-tools-for-agents):
 1. **Agent ergonomics** - tools intuitive for both agents and humans
@@ -82,6 +137,75 @@ From [Complete Guide to Building Skills](https://resources.anthropic.com/hubfs/T
 │  executeCommand() → Command → Microsoft Graph API / SPO  │
 │  Auth (MSAL)  │  Request  │  Output Formatting           │
 └──────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Tool Design Philosophy
+
+Based on user research + Copilot reverse-engineering + Anthropic's principles:
+
+### Principle 1: Intent-Based Tools, Not Command Wrappers
+Don't expose 600+ CLI commands as 600 tools. Group by **user intent**:
+
+| User Intent | Tool Name | Maps to CLI Commands |
+|---|---|---|
+| "Check my email" | `m365-mail-read` | `outlook mail list`, `outlook mail get` |
+| "Send an email" | `m365-mail-send` | `outlook mail send` |
+| "Find a file" | `m365-file-find` | `spo file list`, `onedrive ...`, `search` |
+| "What happened in Teams?" | `m365-teams-catchup` | `teams message list`, `teams channel list` |
+| "Send a Teams message" | `m365-teams-send` | `teams message send` |
+| "Manage tasks" | `m365-task-manage` | `planner task *`, `todo task *` |
+| "SharePoint operations" | `m365-spo-manage` | `spo site/file/list/listitem *` |
+| "Find anything across M365" | `m365-search` | `search` (unified) |
+| "Who is...?" | `m365-people` | `entra user get`, `entra group *` |
+| "Admin operations" | `m365-admin` | `spo site *`, `entra *`, `teams team *` |
+
+**~10 intent-based tools cover 90%+ of scenarios** (vs 600+ raw commands).
+
+### Principle 2: Read-Heavy, Write-Cautious
+- Read tools (list, get, search) → execute immediately, return JSON
+- Write tools (send, create, delete) → include `confirm: true` option, surface what will happen before doing it
+- This matches the 80/20 read/write split observed in Copilot usage
+
+### Principle 3: Pain-Point-First Feature Priority
+Based on user research, these are the **highest-value features** an AI agent should enable:
+
+**P0 — Solves daily pain (every knowledge worker):**
+1. **Email triage assistant**: List inbox → summarize → bulk archive/categorize (pain: 30-60 min/day wasted)
+2. **Teams catch-up**: Summarize unread across all chats/channels (pain: 30-60 min/day wasted)
+3. **Cross-M365 search**: "Find the document Sarah mentioned" (pain: 15-30 min/day wasted)
+4. **Meeting follow-up**: Extract action items → create tasks → draft follow-up email (pain: meetings have no accountability)
+
+**P1 — Solves weekly pain (power users):**
+5. **SharePoint permissions audit**: "Who has access to this site?" (pain: admin nightmare)
+6. **Bulk email operations**: Archive, categorize, move by criteria (pain: Copilot can't do this)
+7. **Team governance**: Find stale teams/channels, suggest cleanup (pain: team sprawl)
+
+**P2 — Admin/developer advantage (CLI's moat):**
+8. **Tenant-wide reporting**: Storage, sharing, compliance reports
+9. **Bulk SharePoint operations**: Metadata updates, file moves, site provisioning
+10. **Power Platform management**: Flow management, app management
+
+### Principle 4: Token Budget by Tool
+| Tool | Default Max Tokens | Rationale |
+|---|---|---|
+| `m365-search` | 2,000 | Return titles/snippets, not full content |
+| `m365-mail-read` (list) | 3,000 | Subject, from, date, preview — not full body |
+| `m365-mail-read` (get single) | 6,000 | Full email body, but truncate if huge |
+| `m365-teams-catchup` | 4,000 | Summaries across channels |
+| `m365-file-find` | 2,000 | File names, paths, modified dates |
+| `m365-spo-manage` | 4,000 | Varies by operation |
+| `m365-admin` | 4,000 | Structured reports |
+
+### Principle 5: Error Messages Are Tools
+Every error should be an actionable instruction the agent can follow:
+```json
+{
+  "error": "Access denied: insufficient permissions",
+  "suggestion": "Run 'm365 login' to authenticate, or request the 'Mail.Read' permission scope from your admin",
+  "helpCommand": "m365 status --output json"
+}
 ```
 
 ---
@@ -229,27 +353,50 @@ m365 agent execute --command "outlook mail list" --options '{"top":5}' --fields 
 
 ```
 skills/
-├── m365-agent/                         # Parent skill pack
-│   ├── SKILL.md                        # Navigator/router skill
+├── m365-agent/                              # Parent skill pack
+│   ├── SKILL.md                             # Navigator/router skill
 │   ├── references/
-│   │   ├── command-cheatsheet.md       # Quick reference for all domains
-│   │   └── auth-troubleshooting.md     # Common auth issues
+│   │   ├── command-cheatsheet.md            # Quick reference for all domains
+│   │   ├── auth-troubleshooting.md          # Common auth issues & fixes
+│   │   └── cross-app-workflows.md           # Multi-service workflow recipes
 │   └── sub-skills/
 │       ├── m365-mail/
-│       │   ├── SKILL.md
+│       │   ├── SKILL.md                     # Mail workflows (pain-point driven)
 │       │   └── references/
-│       │       └── outlook-commands.md
+│       │       └── outlook-commands.md      # Full command reference
 │       ├── m365-teams/
-│       │   ├── SKILL.md
+│       │   ├── SKILL.md                     # Teams workflows
 │       │   └── references/
 │       │       └── teams-commands.md
 │       └── m365-sharepoint/
-│           ├── SKILL.md
+│           ├── SKILL.md                     # SharePoint workflows
 │           └── references/
 │               └── sharepoint-commands.md
 ```
 
-### 2.2 Navigator Skill (`skills/m365-agent/SKILL.md`)
+### 2.2 Prerequisites Section (in every SKILL.md)
+
+```markdown
+## Prerequisites
+
+1. Install the AI-native M365 CLI:
+   ```bash
+   npm install -g github:Zekai-Zhao-321/cli-microsoft365
+   ```
+   Or via npm (when published): `npm install -g @zekai/m365-agent`
+
+2. Authenticate:
+   ```bash
+   m365 login
+   ```
+
+3. Verify connection:
+   ```bash
+   m365 status --output json
+   ```
+```
+
+### 2.3 Navigator Skill (`skills/m365-agent/SKILL.md`)
 
 ```yaml
 ---
@@ -257,8 +404,9 @@ name: m365-agent
 description: >
   Navigates and operates Microsoft 365 services (Outlook mail, Teams, SharePoint)
   using cli-microsoft365. Use when user mentions 'microsoft 365', 'm365', 'office 365',
-  'outlook', 'email', 'teams', 'sharepoint', or asks to interact with any Microsoft
-  cloud service. Routes to domain-specific sub-skills.
+  'outlook', 'email', 'teams', 'sharepoint', 'onedrive', or asks to interact with any
+  Microsoft cloud service. Routes to domain-specific sub-skills for detailed workflows.
+  NOT for Azure DevOps, Azure cloud infrastructure, or Windows administration.
 metadata:
   author: cli-microsoft365
   version: 1.0.0
@@ -266,55 +414,255 @@ metadata:
 ---
 ```
 
-**Navigator instructions:**
-1. Check auth: `m365 status --output json` (is user logged in?)
-2. Route to domain sub-skill based on intent
-3. For cross-domain workflows, orchestrate between sub-skills
-4. For unknown commands, use `m365 agent search --query "<user intent>"`
+**Navigator instructions (progressive disclosure pattern):**
+1. **Always start**: Check auth status with `m365 status --output json`
+2. **Route by intent**:
+   - Email/mail/inbox/outlook → load m365-mail sub-skill
+   - Teams/channels/chat/meetings → load m365-teams sub-skill
+   - SharePoint/files/documents/sites/lists → load m365-sharepoint sub-skill
+   - Cross-domain ("find file mentioned in email") → orchestrate between sub-skills
+3. **Discovery fallback**: `m365 agent search --query "<user intent>" --output json`
+4. **Error recovery**: See `references/auth-troubleshooting.md`
 
-### 2.3 Mail Sub-Skill (`skills/m365-agent/sub-skills/m365-mail/SKILL.md`)
+### 2.4 Mail Sub-Skill — Pain-Point Driven (`skills/m365-agent/sub-skills/m365-mail/SKILL.md`)
 
 ```yaml
 ---
 name: m365-mail
 description: >
   Manages Outlook email in Microsoft 365. Read inbox, send emails, search messages,
-  manage folders. Use when user mentions 'email', 'mail', 'inbox', 'send message',
-  'outlook', or asks to check/manage messages. NOT for calendar or contacts.
+  manage folders, handle attachments. Use when user mentions 'email', 'mail', 'inbox',
+  'send message', 'outlook', 'unread', or asks to check/manage/compose messages.
+  NOT for calendar, contacts, or Teams messages.
 metadata:
   version: 1.0.0
   category: productivity
 ---
 ```
 
-**Workflows documented:**
-- **Read inbox**: `m365 outlook mail list --top 10 --output json` → parse, summarize
-- **Send email**: `m365 outlook mail send --to "email" --subject "..." --bodyContents "..." --bodyContentType Text`
-- **Search**: `m365 outlook mail list --filter "contains(subject,'keyword')" --output json`
-- **Get full email**: `m365 outlook mail get --id <id> --output json`
-- **With attachments**: `m365 outlook mail send --to "..." --attachment <path>`
+**Workflow 1: Inbox Triage** (addresses #1 daily pain: 30-60 min/day wasted)
+```bash
+# List recent emails (token-efficient: only key fields)
+m365 outlook mail list --top 20 --output json --query "[].{subject:subject,from:from.emailAddress.name,received:receivedDateTime,isRead:isRead,importance:importance}"
 
-**Error handling section:**
-- Auth errors → "Run `m365 login` first"
-- Permission errors → "Need Mail.Read or Mail.Send consent"
-- Not found → "Verify message ID with `outlook mail list`"
+# Get full email when needed
+m365 outlook mail get --id <messageId> --output json
 
-### 2.4 Teams Sub-Skill (`skills/m365-agent/sub-skills/m365-teams/SKILL.md`)
+# Move processed emails
+m365 outlook mail move --id <messageId> --targetFolder "Archive"
+```
 
-**Workflows:**
-- List teams/channels: `m365 teams team list`, `m365 teams channel list --teamId <id>`
-- Send message: `m365 teams message send --teamId <id> --channelId <id> --message "..."`
-- Get messages: `m365 teams message list --teamId <id> --channelId <id>`
-- Manage members: `m365 teams member list/add/remove`
+**Workflow 2: Send Email** (addresses composing pain)
+```bash
+# Simple text email
+m365 outlook mail send --to "user@company.com" --subject "Subject" --bodyContents "Body text" --bodyContentType Text
 
-### 2.5 SharePoint Sub-Skill (`skills/m365-agent/sub-skills/m365-sharepoint/SKILL.md`)
+# HTML email with CC
+m365 outlook mail send --to "user@company.com" --cc "other@company.com" --subject "Subject" --bodyContents "<p>HTML body</p>" --bodyContentType HTML
 
-**Workflows:**
-- Browse sites: `m365 spo site list --output json`
-- List files: `m365 spo file list --webUrl <url> --folderUrl <path>`
-- Upload file: `m365 spo file add --webUrl <url> --folder <path> --path <local>`
-- Download: `m365 spo file get --webUrl <url> --url <fileUrl> --asFile --path <local>`
-- List items: `m365 spo listitem list --webUrl <url> --listTitle <title>`
+# With attachment
+m365 outlook mail send --to "user@company.com" --subject "Subject" --bodyContents "See attached" --attachment "/path/to/file.pdf"
+```
+
+**Workflow 3: Email Search** (addresses search pain: 15-30 min/day wasted)
+```bash
+# Search by subject keyword
+m365 outlook mail list --filter "contains(subject,'budget')" --output json
+
+# Search by sender
+m365 outlook mail list --filter "from/emailAddress/address eq 'boss@company.com'" --output json
+
+# Cross-M365 search (finds emails, files, Teams messages)
+m365 search --scopes "message" --queryText "quarterly review" --output json
+```
+
+**Workflow 4: Bulk Operations** (Copilot CAN'T do this — our differentiator)
+```bash
+# List all unread from a sender (agent pipes output to next command)
+m365 outlook mail list --filter "isRead eq false and from/emailAddress/address eq 'newsletters@company.com'" --output json
+
+# Agent can then loop through results to archive/move/categorize
+```
+
+**Error handling:**
+| Error | Cause | Fix |
+|---|---|---|
+| "Access denied" | Not logged in or missing permissions | `m365 login` then ensure Mail.Read / Mail.Send scope |
+| "Resource not found" | Invalid message ID | Re-list with `outlook mail list` to get valid IDs |
+| "Throttled" | Too many API calls | Wait 30 seconds, retry with `--top` to reduce batch size |
+
+### 2.5 Teams Sub-Skill — Pain-Point Driven (`skills/m365-agent/sub-skills/m365-teams/SKILL.md`)
+
+```yaml
+---
+name: m365-teams
+description: >
+  Manages Microsoft Teams conversations, channels, and team membership.
+  Use when user mentions 'teams', 'channel', 'chat', 'team message',
+  'meeting', or asks about Teams conversations. NOT for email or SharePoint files.
+metadata:
+  version: 1.0.0
+  category: productivity
+---
+```
+
+**Workflow 1: Teams Catch-Up** (addresses #1 pain: notification overload)
+```bash
+# List all teams the user belongs to
+m365 teams team list --joined --output json --query "[].{name:displayName,id:id}"
+
+# List channels in a team
+m365 teams channel list --teamId <teamId> --output json --query "[].{name:displayName,id:id}"
+
+# Get recent messages from a channel
+m365 teams message list --teamId <teamId> --channelId <channelId> --output json
+```
+
+**Workflow 2: Send Channel Message**
+```bash
+m365 teams message send --teamId <teamId> --channelId <channelId> --message "Your message here"
+```
+
+**Workflow 3: Team Membership Management**
+```bash
+# List members
+m365 teams member list --teamId <teamId> --output json
+
+# Add member
+m365 teams member add --teamId <teamId> --userId <userId> --role member
+
+# Remove member
+m365 teams member remove --teamId <teamId> --userId <userId>
+```
+
+**Workflow 4: Team Governance** (Copilot CAN'T do this — our differentiator)
+```bash
+# List all teams (admin can find stale ones)
+m365 teams team list --output json --query "[].{name:displayName,id:id,createdDateTime:createdDateTime}"
+
+# Archive inactive teams
+m365 teams team archive --id <teamId>
+```
+
+### 2.6 SharePoint Sub-Skill — Pain-Point Driven (`skills/m365-agent/sub-skills/m365-sharepoint/SKILL.md`)
+
+```yaml
+---
+name: m365-sharepoint
+description: >
+  Manages SharePoint Online sites, document libraries, files, lists, and permissions.
+  Use when user mentions 'sharepoint', 'document library', 'site', 'file upload',
+  'download file', 'list items', 'permissions', or asks about documents/files in M365.
+  NOT for OneDrive personal files or Teams messages.
+metadata:
+  version: 1.0.0
+  category: productivity
+---
+```
+
+**Workflow 1: Find & Access Documents** (addresses #1 pain: unreliable search)
+```bash
+# Search across all SharePoint
+m365 search --scopes "driveItem" --queryText "quarterly report" --output json
+
+# Browse a specific site's files
+m365 spo file list --webUrl "https://contoso.sharepoint.com/sites/project" --folderUrl "/Shared Documents" --output json
+
+# Download a file
+m365 spo file get --webUrl "https://contoso.sharepoint.com/sites/project" --url "/Shared Documents/report.docx" --asFile --path "./report.docx"
+```
+
+**Workflow 2: Upload & Share Files**
+```bash
+# Upload file
+m365 spo file add --webUrl "https://contoso.sharepoint.com/sites/project" --folder "/Shared Documents" --path "./report.pdf"
+
+# Share with specific user
+m365 spo file sharinglink add --webUrl "https://contoso.sharepoint.com/sites/project" --fileUrl "/Shared Documents/report.pdf" --type view --scope users
+```
+
+**Workflow 3: Permissions Audit** (Copilot CAN'T do this — #1 admin pain point)
+```bash
+# Check site permissions
+m365 spo site get --url "https://contoso.sharepoint.com/sites/project" --output json
+
+# List site users/groups
+m365 spo user list --webUrl "https://contoso.sharepoint.com/sites/project" --output json
+
+# Check specific group permissions
+m365 spo group list --webUrl "https://contoso.sharepoint.com/sites/project" --output json
+```
+
+**Workflow 4: List/Item Management**
+```bash
+# List SharePoint lists
+m365 spo list list --webUrl "https://contoso.sharepoint.com/sites/project" --output json
+
+# Get list items
+m365 spo listitem list --webUrl "https://contoso.sharepoint.com/sites/project" --listTitle "Tasks" --output json
+
+# Add list item
+m365 spo listitem add --webUrl "https://contoso.sharepoint.com/sites/project" --listTitle "Tasks" --Title "New task" --Status "Not Started"
+```
+
+**Workflow 5: Bulk Operations** (Copilot CAN'T do this — our differentiator)
+```bash
+# List all sites (find sprawl)
+m365 spo site list --output json --query "[].{title:Title,url:Url,lastModified:LastContentModifiedDate,storageUsed:StorageUsageCurrent}"
+
+# Site lifecycle: identify stale sites (agent processes dates)
+# Bulk metadata updates (agent loops through listitem set commands)
+```
+
+### 2.7 Cross-App Workflow Recipes (`references/cross-app-workflows.md`)
+
+**Recipe: Meeting Follow-Up Pipeline**
+```
+1. Get meeting details from calendar
+2. Find related Teams channel messages
+3. Extract action items (agent summarizes)
+4. Create Planner tasks for each action item
+5. Draft follow-up email with task assignments
+6. Send to attendees
+```
+
+**Recipe: "Find the file Sarah mentioned"**
+```
+1. Search Teams messages for files shared by Sarah
+2. Resolve file reference to SharePoint/OneDrive
+3. Get file metadata and sharing info
+4. Download or return file link
+```
+
+**Recipe: New Project Setup**
+```
+1. Create Teams team
+2. Create channels for workstreams
+3. SharePoint site is auto-created with team
+4. Create Planner plan with standard buckets
+5. Upload template documents to SharePoint
+6. Add team members
+```
+
+---
+
+## Current CLI Coverage vs Agent Needs
+
+| Domain | Existing Commands | Coverage for Agent | Key Gaps |
+|---|---|---|---|
+| **Outlook (mail)** | 22 | Moderate | Missing: calendar CRUD, contacts, categories, focused inbox settings |
+| **Teams** | 73 | Good | Missing: transcript search, presence, meeting management |
+| **SharePoint** | 459 | Excellent | CLI's strongest area — perfect for admin/governance skills |
+| **OneDrive** | 8 (mostly reports) | Weak | Missing: file search, sharing, version management, folder CRUD |
+| **Planner** | ~15 | Good | Plan/bucket/task CRUD covered |
+| **To Do** | ~10 | Good | List/task CRUD covered |
+| **Entra ID** | 119 | Good | User/group/app management covered |
+| **Search** | 1 (unified) | Critical | Already supports exact same search surface as Copilot — **this is our #1 tool** |
+| **Insights** | 0 | Missing | No trending/used/shared files endpoints |
+| **People** | 0 | Missing | No people graph, org chart, relationship queries |
+| **Presence** | 0 | Missing | No user availability status |
+
+**Strategy**: v1 works with what exists (plenty for mail, teams, sharepoint skills). v2 adds missing Graph endpoints for insights/people/presence.
 
 ---
 
