@@ -63,12 +63,11 @@ export class GraphClient {
       const maxTokens = options?.maxTokens;
       let hasMore = false;
       if (maxTokens && Array.isArray(data)) {
-        while (data.length > 0 && this.estimateTokens(data) > maxTokens) {
-          data = data.slice(0, Math.max(1, Math.floor(data.length / 2)));
+        while (data.length > 1 && this.estimateTokens(data) > maxTokens) {
+          data = data.slice(0, Math.floor(data.length / 2));
           hasMore = true;
         }
-        if (this.estimateTokens(data) > maxTokens && data.length > 0) {
-          data = data.slice(0, 1);
+        if (data.length === 1 && this.estimateTokens(data) > maxTokens) {
           hasMore = true;
         }
       }

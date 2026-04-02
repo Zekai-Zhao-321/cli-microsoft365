@@ -99,11 +99,19 @@ export function formatForAgent<T>(data: T, opts?: FormatterOptions): FormatterRe
   if (tokenEst > maxTokens) {
     truncated = true;
     if (Array.isArray(result)) {
-      // Slice array to fit
-      while (result.length > 0 && estimateTokens(result) > maxTokens) {
-        result = result.slice(0, Math.max(1, Math.floor(result.length / 2)));
+      // Binary search to find how many items fit within token budget
+      let low = 0;
+      let high = result.length;
+      while (low < high) {
+        const mid = Math.ceil((low + high) / 2);
+        if (estimateTokens(result.slice(0, mid)) <= maxTokens) {
+          low = mid;
+        }
+        else {
+          high = mid - 1;
+        }
       }
-      // If still too large with 1 element, just keep it
+      result = result.slice(0, Math.max(low, 1));
       tokenEst = estimateTokens(result);
     }
     else if (typeof result === 'string') {

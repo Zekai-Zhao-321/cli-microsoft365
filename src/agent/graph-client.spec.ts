@@ -75,7 +75,7 @@ describe('GraphClient', () => {
 
       assert(stub.calledOnce);
       const opts = stub.firstCall.args[0];
-      assert(opts.url.includes('https://graph.microsoft.com/v1.0/me/messages'));
+      assert(opts.url!.includes('https://graph.microsoft.com/v1.0/me/messages'));
     });
 
     it('should append $select query parameter from options', async () => {
@@ -84,7 +84,7 @@ describe('GraphClient', () => {
       await client.get('/me/messages', { select: ['id', 'subject'] });
 
       const opts = stub.firstCall.args[0];
-      assert(opts.url.includes('$select=id,subject'));
+      assert(opts.url!.includes('$select=id,subject'));
     });
 
     it('should append $filter query parameter from options', async () => {
@@ -93,8 +93,8 @@ describe('GraphClient', () => {
       await client.get('/me/messages', { filter: "isRead eq false" });
 
       const opts = stub.firstCall.args[0];
-      assert(opts.url.includes('$filter='));
-      assert(opts.url.includes('isRead'));
+      assert(opts.url!.includes('$filter='));
+      assert(opts.url!.includes('isRead'));
     });
 
     it('should append $top query parameter from options', async () => {
@@ -103,7 +103,7 @@ describe('GraphClient', () => {
       await client.get('/me/messages', { top: 5 });
 
       const opts = stub.firstCall.args[0];
-      assert(opts.url.includes('$top=5'));
+      assert(opts.url!.includes('$top=5'));
     });
 
     it('should append $skip query parameter from options', async () => {
@@ -112,7 +112,7 @@ describe('GraphClient', () => {
       await client.get('/me/messages', { skip: 10 });
 
       const opts = stub.firstCall.args[0];
-      assert(opts.url.includes('$skip=10'));
+      assert(opts.url!.includes('$skip=10'));
     });
 
     it('should append $orderby query parameter from options', async () => {
@@ -121,7 +121,7 @@ describe('GraphClient', () => {
       await client.get('/me/messages', { orderBy: 'receivedDateTime desc' });
 
       const opts = stub.firstCall.args[0];
-      assert(opts.url.includes('$orderby='));
+      assert(opts.url!.includes('$orderby='));
     });
 
     it('should append $expand query parameter from options', async () => {
@@ -130,7 +130,7 @@ describe('GraphClient', () => {
       await client.get('/me/messages', { expand: 'attachments' });
 
       const opts = stub.firstCall.args[0];
-      assert(opts.url.includes('$expand=attachments'));
+      assert(opts.url!.includes('$expand=attachments'));
     });
 
     it('should combine multiple query parameters correctly', async () => {
@@ -139,9 +139,9 @@ describe('GraphClient', () => {
       await client.get('/me/messages', { select: ['id'], top: 5, filter: "isRead eq false" });
 
       const opts = stub.firstCall.args[0];
-      assert(opts.url.includes('$select=id'));
-      assert(opts.url.includes('$top=5'));
-      assert(opts.url.includes('$filter='));
+      assert(opts.url!.includes('$select=id'));
+      assert(opts.url!.includes('$top=5'));
+      assert(opts.url!.includes('$filter='));
     });
 
     it('should strip @odata.context from response', async () => {
