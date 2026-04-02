@@ -12,6 +12,67 @@ The AI agent ecosystem has shifted decisively toward CLI-first tooling:
 
 Sources: [MCP is Dead; Long Live MCP!](https://chrlschn.dev/blog/2026/03/mcp-is-dead-long-live-mcp/), [Why CLI Tools Are Beating MCP](https://jannikreinhard.com/2026/02/22/why-cli-tools-are-beating-mcp-for-ai-agents/), [MCP vs CLI Benchmark](https://www.scalekit.com/blog/mcp-vs-cli-use)
 
+### Competitive Landscape: Softeria ms-365-mcp-server
+
+The most popular community M365 MCP server ([GitHub](https://github.com/Softeria/ms-365-mcp-server)) — **584 stars**, 223 forks, 86+ tools. Key learnings:
+
+**What they cover (86 tools):**
+| Domain | Tools | Notes |
+|---|---|---|
+| Mail | 13 | List, send, draft, move, delete, folders |
+| Calendar | 7 | CRUD events, calendar view |
+| OneDrive | 6 | Browse, upload, download, delete |
+| Excel | 5 | Worksheets, ranges, charts |
+| OneNote | 5 | Notebooks, sections, pages |
+| To Do | 6 | Full CRUD |
+| Planner | 5 | Plans, tasks |
+| Contacts | 5 | Full CRUD |
+| Teams/Chats | 15 | Chats, channels, messages, members |
+| SharePoint | 12 | Sites, drives, lists, items |
+| Shared Mailbox | 4 | Read/send from shared mailboxes |
+| Utility | 3 | Current user, search, list users |
+
+**What they DON'T cover (our moat):**
+- No Power Platform, Entra ID, Intune, Security & Compliance, Viva
+- No SharePoint admin operations (cli-microsoft365 has 459!)
+- No bulk operations, no scripting/chaining
+- No offline/cached operations
+- No enterprise deployment story (proxy, K8s, multi-tenant admin)
+
+**Their top pain points (from GitHub issues):**
+1. **Auth is #1 friction** — OAuth/PKCE bugs, token refresh issues, enterprise SSO problems
+2. **Context window overload** — 86+ tools overwhelm LLM context (they added "presets" to mitigate)
+3. **Large inbox performance** — doesn't handle large mailboxes well
+4. **Enterprise deployment gaps** — proxy, HTTPS, K8s all unsolved
+
+**Key insight — the PnP wrapper exists too:**
+[pnp/cli-microsoft365-mcp-server](https://github.com/pnp/cli-microsoft365-mcp-server) (91 stars) wraps cli-microsoft365 with just 4 meta-tools (search commands, get docs, run command, get best practices). Only 91 stars vs Softeria's 584 — suggests the wrapper approach hasn't captured mindshare because it requires pre-installing the CLI. But the 4-meta-tool pattern is smart — avoids context bloat.
+
+**Competitive positioning for our project:**
+| Dimension | Softeria MCP | PnP MCP Wrapper | Our Agent CLI |
+|---|---|---|---|
+| Install friction | `npx` one-liner | Install CLI + MCP | Install CLI (npm -g) |
+| Auth quality | Fragile (PKCE bugs) | Battle-tested (CLI) | Battle-tested (CLI) |
+| Tool count | 86 (context bloat) | 4 meta-tools | ~10 intent-based |
+| Coverage | End-user only | 600+ commands | 200 Graph endpoints + CLI fallback |
+| Bulk operations | No | Yes (via CLI) | Yes (native) |
+| Admin/governance | No | Yes (via CLI) | Yes (native) |
+| Token efficiency | TOON format (30-60% savings) | Medium | Field selection + pagination |
+| Skills/workflows | No | No | Claude Skills with progressive disclosure |
+| Composability | MCP only | CLI pipes | CLI pipes + programmatic API |
+
+**Must-match from Softeria:**
+1. Zero-friction setup (npm one-liner)
+2. Multi-account support
+3. Selective tool loading (their "presets" → our Skills progressive disclosure)
+4. Calendar, Contacts, OneDrive, Excel, OneNote coverage
+
+### Request.ts Proxy Issue (Affects Our Architecture)
+
+`src/request.ts:189-193` manually reads `HTTP_PROXY`/`HTTPS_PROXY` and sets `options.proxy` on every request. This bypasses Axios's native `proxy-from-env` which handles `NO_PROXY`. Active PR discussion with maintainer — the fix is to remove `createProxyConfigFromUrl` entirely and let Axios handle it natively.
+
+**Impact on us**: We reuse `request.ts` directly. In our fork, we should apply the fix (remove lines 189-193 and `createProxyConfigFromUrl`). Corporate proxy users are a key audience for M365 tooling.
+
 ### How People Actually Use M365 (Daily Pain Points)
 
 #### Outlook (Email) — 2.5-4 hours/day, 120-150 emails/day
