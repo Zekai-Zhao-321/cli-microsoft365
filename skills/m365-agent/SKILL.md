@@ -24,15 +24,15 @@ You can operate Microsoft 365 like a human employee using the `m365` CLI agent c
 
 ## Quick Reference
 
-| Module   | Key Operations                                    | When to Use                           |
-|----------|---------------------------------------------------|---------------------------------------|
-| mail     | listInbox, sendMail, searchMail, moveMessage      | Email triage, sending, organizing     |
-| calendar | getToday, createEvent, findMeetingTimes           | Scheduling, calendar management       |
-| teams    | sendChannelMessage, listChats, listMyTeams        | Team communication, collaboration     |
-| files    | listRootFiles, uploadSmallFile, searchFiles       | Document management, file sharing     |
-| tasks    | createTask, createPlannerTask, listTasks          | Task tracking, project management     |
-| people   | searchPeople, getUserProfile, listContacts        | Finding people, contact management    |
-| search   | searchAll, searchByEntityType                     | Cross-domain content discovery        |
+| Module   | Key Operations                                           | When to Use                           |
+|----------|----------------------------------------------------------|---------------------------------------|
+| mail     | listInbox, sendMail, searchMail, moveMessage             | Email triage, sending, organizing     |
+| calendar | getToday, createEvent, findMeetingTimes                  | Scheduling, calendar management       |
+| teams    | sendChannelMessage, listChats, listMyTeams               | Team communication, collaboration     |
+| files    | listRootFiles, uploadSmallFile, searchFiles              | Document management, file sharing     |
+| tasks    | createTask, createPlannerTask, listTasks                 | Task tracking, project management     |
+| people   | searchPeople, getUserProfile, listContacts               | Finding people, contact management    |
+| search   | searchAll, searchByEntityType                            | Cross-domain content discovery        |
 
 ## Usage Pattern
 
@@ -54,7 +54,7 @@ m365 agent status
 - **"Send an email to..."** → mail.sendMail
 - **"How many unread messages?"** → mail.getUnreadCount
 - **"What meetings do I have today?"** → calendar.getToday
-- **"Schedule a meeting with..."** → calendar.findMeetingTimes → calendar.createEvent
+- **"Schedule a meeting with..."** → calendar.findMeetingTimes + calendar.createEvent
 - **"What's on my calendar this week?"** → calendar.getThisWeek
 - **"Post in the #general channel"** → teams.sendChannelMessage
 - **"Show my recent chats"** → teams.listChats
@@ -82,19 +82,21 @@ All operations return structured JSON with actionable error messages:
 
 Common errors and remedies:
 
-| Error Code                    | Meaning                        | Fix                                      |
-|-------------------------------|--------------------------------|------------------------------------------|
-| `Authorization_RequestDenied` | Missing Graph permission scope | Re-authenticate with required scope      |
-| `Request_ResourceNotFound`    | Item ID is invalid or deleted  | Re-list items and use fresh ID           |
-| `TooManyRequests`             | Graph API rate limit hit       | Wait 30s and retry with exponential back-off |
-| `InvalidAuthenticationToken`  | Token expired                  | Run `m365 login` again                   |
+| Error Code                    | Meaning                        | Fix                                          |
+|-------------------------------|--------------------------------|----------------------------------------------|
+| `Authorization_RequestDenied` | Missing Graph permission scope | Re-authenticate with required scope          |
+| `Request_ResourceNotFound`    | Item ID is invalid or deleted  | Re-list items and use a fresh ID             |
+| `TooManyRequests`             | Graph API rate limit hit       | Wait 30s, retry with exponential back-off    |
+| `InvalidAuthenticationToken`  | Token expired                  | Run `m365 login` again                       |
 
 ## Domain Sub-Skills
 
 For deep workflows, load the focused skill for each domain:
 
 - **m365-mail** — inbox triage, send with attachments, bulk operations, mail rules
-- **m365-calendar** — daily briefing, meeting scheduling, RSVP handling
+- **m365-calendar** — daily briefing, meeting scheduling, RSVP handling, free/busy lookup
 - **m365-teams** — channel messages, chat history, online meetings, presence
 - **m365-files** — OneDrive/SharePoint browsing, upload, sharing links, versioning
 - **m365-tasks** — Microsoft To Do tasks, Planner plans/buckets/assignments
+
+Full operation catalog: `skills/m365-agent/references/api-reference.md`
