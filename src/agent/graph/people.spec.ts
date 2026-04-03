@@ -143,7 +143,7 @@ describe('PeopleOperations', () => {
 
       const [, opts] = client.get.firstCall.args;
       assert(opts !== undefined);
-      assert(opts!.search !== undefined || (opts as any).$search !== undefined || JSON.stringify(opts).includes('Alice'));
+      assert((opts as any).search !== undefined || (opts as any).$search !== undefined || JSON.stringify(opts).includes('Alice'));
     });
 
     it('should return matched people on success', async () => {
