@@ -1,15 +1,3 @@
----
-name: m365-tasks
-description: >
-  Manages tasks in Microsoft To Do and Planner. Create, update, and track tasks.
-  Use when user mentions 'task', 'todo', 'to-do', 'planner', 'plan', 'bucket',
-  'assignment', 'due date', 'reminder', or asks about task tracking or project management.
-metadata:
-  author: cli-microsoft365
-  version: 1.0.0
-  category: productivity
----
-
 # M365 Tasks
 
 Full task management via the `tasks` module of the M365 agent layer, covering both Microsoft To Do and Microsoft Planner.

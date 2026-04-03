@@ -1,73 +1,125 @@
 ---
 name: m365-agent
 description: >
-  Operates Microsoft 365 as an AI employee using cli-microsoft365 agent layer.
-  Manages email, calendar, Teams, files, tasks, contacts, and search.
-  Use when user mentions 'email', 'mail', 'calendar', 'meeting', 'teams',
-  'sharepoint', 'onedrive', 'planner', 'todo', 'task', 'outlook',
-  'microsoft 365', 'm365', 'office 365', or asks to manage their work.
+  Operates Microsoft 365 as an AI employee. Manages email, calendar, Teams,
+  OneDrive/SharePoint files, Planner/To Do tasks, contacts, and cross-domain search.
+  Use when user mentions email, mail, inbox, outlook, calendar, meeting, schedule,
+  teams, channel, chat, sharepoint, onedrive, file, upload, planner, todo, task,
+  contact, people, microsoft 365, m365, or asks to manage their work day.
 metadata:
   author: cli-microsoft365
   version: 1.0.0
   category: productivity
+  tags: [microsoft-365, outlook, teams, sharepoint, planner, graph-api]
 ---
 
 # Microsoft 365 Agent
 
-You can operate Microsoft 365 like a human employee using the `m365` CLI agent commands.
+Operate Microsoft 365 like a human employee via `m365 agent` CLI commands.
 
 ## Setup
 
-1. Install: `npm install -g @pnp/cli-microsoft365`
-2. Authenticate: `m365 login`
-3. Verify: `m365 agent status`
-
-## Quick Reference
-
-| Module   | Key Operations                                           | When to Use                           |
-|----------|----------------------------------------------------------|---------------------------------------|
-| mail     | listInbox, sendMail, searchMail, moveMessage             | Email triage, sending, organizing     |
-| calendar | getToday, createEvent, findMeetingTimes                  | Scheduling, calendar management       |
-| teams    | sendChannelMessage, listChats, listMyTeams               | Team communication, collaboration     |
-| files    | listRootFiles, uploadSmallFile, searchFiles              | Document management, file sharing     |
-| tasks    | createTask, createPlannerTask, listTasks                 | Task tracking, project management     |
-| people   | searchPeople, getUserProfile, listContacts               | Finding people, contact management    |
-| search   | searchAll, searchByEntityType                            | Cross-domain content discovery        |
-
-## Usage Pattern
-
 ```bash
-# Discover operations
-m365 agent search --query "send email"
-
-# Execute an operation
-m365 agent execute --module mail --operation sendMail \
-  --params '{"to":["user@contoso.com"],"subject":"Hello","body":"Hi there"}'
-
-# Check status
-m365 agent status
+npm install -g @pnp/cli-microsoft365
+m365 login
+m365 agent status   # verify connection + available modules
 ```
 
-## Module Routing
+## Command Pattern
 
-- **"Check my email"** → mail.listInbox
-- **"Send an email to..."** → mail.sendMail
-- **"How many unread messages?"** → mail.getUnreadCount
-- **"What meetings do I have today?"** → calendar.getToday
-- **"Schedule a meeting with..."** → calendar.findMeetingTimes + calendar.createEvent
-- **"What's on my calendar this week?"** → calendar.getThisWeek
-- **"Post in the #general channel"** → teams.sendChannelMessage
-- **"Show my recent chats"** → teams.listChats
-- **"Find the quarterly report"** → search.searchAll or files.searchFiles
-- **"Upload a file"** → files.uploadSmallFile
-- **"Share a file with..."** → files.createSharingLink
-- **"Create a task to..."** → tasks.createTask (To Do) or tasks.createPlannerTask (Planner)
-- **"Who is the manager of..."** → people.getUserManager
-- **"Find someone named..."** → people.searchPeople or people.searchUsers
+```bash
+# Execute any operation
+m365 agent execute --module <module> --operation <operation> --params '<json>'
+
+# Discover operations
+m365 agent search --query "send email"
+m365 agent search --module calendar
+```
+
+## Module Quick Reference
+
+| Module | Operations | When to use |
+|--------|-----------|-------------|
+| mail | listInbox, sendMail, searchMail, moveMessage, bulkMove | Email: read, send, organize, triage |
+| calendar | getToday, createEvent, findMeetingTimes, getSchedule | Scheduling, meetings, availability |
+| teams | sendChannelMessage, listChats, createOnlineMeeting | Chat, channels, meetings, presence |
+| files | listRootFiles, uploadSmallFile, searchFiles, createSharingLink | OneDrive/SharePoint file management |
+| tasks | createTask, createPlannerTask, completeTask, assignPlannerTask | To Do lists, Planner boards |
+| people | searchPeople, getUserProfile, getUserManager, listContacts | Find people, org chart, contacts |
+| search | searchAll, searchByEntityType, searchWithFilters | Cross-domain content discovery |
+
+## Intent Routing
+
+Map the user's intent to the right module and operation:
+
+**Email**
+- "Check my email" → `mail.listInbox`
+- "Send an email to..." → `mail.sendMail`
+- "How many unread?" → `mail.getUnreadCount`
+- "Find emails about..." → `mail.searchMail`
+- "Archive old messages" → `mail.bulkMove`
+- For full mail reference: read [references/mail.md](references/mail.md)
+
+**Calendar**
+- "What's on my calendar today?" → `calendar.getToday`
+- "Schedule a meeting with..." → `calendar.findMeetingTimes` then `calendar.createEvent`
+- "Am I free on Friday?" → `calendar.getSchedule`
+- "Accept/decline the invite" → `calendar.acceptEvent` / `calendar.declineEvent`
+- For full calendar reference: read [references/calendar.md](references/calendar.md)
+
+**Teams**
+- "Post in #general" → `teams.sendChannelMessage`
+- "Show my recent chats" → `teams.listChats`
+- "Set up a Teams meeting" → `teams.createOnlineMeeting`
+- "Set my status to busy" → `teams.setMyPresence`
+- For full teams reference: read [references/teams.md](references/teams.md)
+
+**Files**
+- "Find the quarterly report" → `files.searchFiles` or `search.searchAll`
+- "Upload this file" → `files.uploadSmallFile` (< 4MB) or `files.createUploadSession` (large)
+- "Share a file with..." → `files.createSharingLink`
+- "Show recent files" → `files.getRecentFiles`
+- For full files reference: read [references/files.md](references/files.md)
+
+**Tasks**
+- "Create a task to..." → `tasks.createTask` (To Do) or `tasks.createPlannerTask` (Planner)
+- "Show my tasks" → `tasks.listTasks` or `tasks.listTasksInPlan`
+- "Mark task done" → `tasks.completeTask`
+- For full tasks reference: read [references/tasks.md](references/tasks.md)
+
+**People**
+- "Who is the manager of..." → `people.getUserManager`
+- "Find someone named..." → `people.searchPeople`
+- For full people reference: read [references/api-reference.md](references/api-reference.md)
+
+**Cross-domain search**
+- "Find anything about..." → `search.searchAll`
+- "Search emails about..." → `search.searchByEntityType` with `message`
+- "Search files named..." → `search.searchByEntityType` with `driveItem`
+
+## Multi-Step Workflows
+
+**Inbox triage** (Sequential Workflow pattern):
+1. `mail.getUnreadCount` → check volume
+2. `mail.listInbox` with `filter: "isRead eq false"` and `top: 20`
+3. For each message: summarize, then `mail.markAsRead`, `mail.moveMessage`, or `mail.flagMessage`
+4. Report summary to user
+
+**Schedule a meeting** (Multi-step):
+1. `calendar.findMeetingTimes` → find available slots
+2. Present options to user
+3. `calendar.createEvent` with chosen slot + attendees
+4. Optionally `teams.createOnlineMeeting` for Teams link
+
+**Daily briefing** (Sequential):
+1. `calendar.getToday` → today's meetings
+2. `mail.getUnreadCount` → unread email count
+3. `tasks.listTasks` → pending tasks
+4. Summarize to user
 
 ## Error Handling
 
-All operations return structured JSON with actionable error messages:
+All operations return structured JSON:
 
 ```json
 {
@@ -80,23 +132,20 @@ All operations return structured JSON with actionable error messages:
 }
 ```
 
-Common errors and remedies:
+| Error Code | Fix |
+|-----------|-----|
+| `InvalidAuthenticationToken` | Run `m365 login` |
+| `Authorization_RequestDenied` | Re-login with required scope |
+| `Request_ResourceNotFound` | Re-list items, use fresh ID |
+| `TooManyRequests` | Wait 30s, retry |
 
-| Error Code                    | Meaning                        | Fix                                          |
-|-------------------------------|--------------------------------|----------------------------------------------|
-| `Authorization_RequestDenied` | Missing Graph permission scope | Re-authenticate with required scope          |
-| `Request_ResourceNotFound`    | Item ID is invalid or deleted  | Re-list items and use a fresh ID             |
-| `TooManyRequests`             | Graph API rate limit hit       | Wait 30s, retry with exponential back-off    |
-| `InvalidAuthenticationToken`  | Token expired                  | Run `m365 login` again                       |
+## References
 
-## Domain Sub-Skills
+Load these only when you need detailed operation parameters:
 
-For deep workflows, load the focused skill for each domain:
-
-- **m365-mail** — inbox triage, send with attachments, bulk operations, mail rules
-- **m365-calendar** — daily briefing, meeting scheduling, RSVP handling, free/busy lookup
-- **m365-teams** — channel messages, chat history, online meetings, presence
-- **m365-files** — OneDrive/SharePoint browsing, upload, sharing links, versioning
-- **m365-tasks** — Microsoft To Do tasks, Planner plans/buckets/assignments
-
-Full operation catalog: `skills/m365-agent/references/api-reference.md`
+- [references/mail.md](references/mail.md) — 27 mail operations, workflows, bulk ops
+- [references/calendar.md](references/calendar.md) — 14 calendar operations, scheduling workflows
+- [references/teams.md](references/teams.md) — 21 Teams operations, messaging, meetings
+- [references/files.md](references/files.md) — 18 file operations, upload, sharing
+- [references/tasks.md](references/tasks.md) — 17 task operations, To Do + Planner
+- [references/api-reference.md](references/api-reference.md) — Complete operation catalog with all parameters

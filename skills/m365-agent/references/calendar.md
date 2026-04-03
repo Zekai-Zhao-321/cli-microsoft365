@@ -1,15 +1,3 @@
----
-name: m365-calendar
-description: >
-  Manages Microsoft 365 calendar. View, create, and manage events and meetings.
-  Use when user mentions 'calendar', 'meeting', 'schedule', 'appointment',
-  'free time', 'availability', 'rsvp', 'invite', 'reschedule', or asks about their day/week.
-metadata:
-  author: cli-microsoft365
-  version: 1.0.0
-  category: productivity
----
-
 # M365 Calendar
 
 Full calendar management via the `calendar` module of the M365 agent layer.

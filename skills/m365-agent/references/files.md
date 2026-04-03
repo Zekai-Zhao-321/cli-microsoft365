@@ -1,15 +1,3 @@
----
-name: m365-files
-description: >
-  Manages files on OneDrive and SharePoint. Upload, download, search, and share files.
-  Use when user mentions 'file', 'document', 'onedrive', 'sharepoint', 'upload',
-  'download', 'share', 'folder', 'version', 'recent files', or asks about documents.
-metadata:
-  author: cli-microsoft365
-  version: 1.0.0
-  category: productivity
----
-
 # M365 Files
 
 Full file management via the `files` module of the M365 agent layer (OneDrive + SharePoint).

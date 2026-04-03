@@ -1,16 +1,3 @@
----
-name: m365-teams
-description: >
-  Manages Microsoft Teams communication. Send messages, manage channels, teams,
-  and online meetings. Use when user mentions 'teams', 'channel', 'chat',
-  'team message', 'post', 'meeting link', 'presence', 'transcript', or asks
-  about team communication or collaboration.
-metadata:
-  author: cli-microsoft365
-  version: 1.0.0
-  category: productivity
----
-
 # M365 Teams
 
 Full Teams management via the `teams` module of the M365 agent layer.

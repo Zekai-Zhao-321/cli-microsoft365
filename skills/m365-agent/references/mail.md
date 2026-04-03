@@ -1,15 +1,3 @@
----
-name: m365-mail
-description: >
-  Manages Microsoft 365 email. Read, send, search, and organize Outlook emails.
-  Use when user mentions 'email', 'mail', 'inbox', 'send message', 'outlook',
-  'unread', 'attachment', 'forward', 'reply', or asks to check/manage their messages.
-metadata:
-  author: cli-microsoft365
-  version: 1.0.0
-  category: productivity
----
-
 # M365 Mail
 
 Full email management via the `mail` module of the M365 agent layer.
