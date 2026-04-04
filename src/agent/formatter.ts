@@ -119,13 +119,22 @@ export function formatForAgent<T>(data: T, opts?: FormatterOptions): FormatterRe
       result = truncateString(result, maxChars);
       tokenEst = estimateTokens(result);
     }
-    else {
-      const str = JSON.stringify(result);
+    else if (typeof result === 'object' && result !== null) {
+      // For objects over budget, selectively remove large string fields
+      // rather than slicing JSON mid-stream (which produces invalid JSON)
+      const clone = JSON.parse(JSON.stringify(result));
       const maxChars = maxTokens * 4;
-      if (str.length > maxChars) {
-        result = JSON.parse(str.slice(0, maxChars) + '"}') || result;
-        tokenEst = estimateTokens(result);
+
+      if (JSON.stringify(clone).length > maxChars) {
+        // Truncate large string values in the clone
+        for (const key of Object.keys(clone)) {
+          if (typeof clone[key] === 'string' && clone[key].length > 200) {
+            clone[key] = clone[key].slice(0, 200) + '...[truncated]';
+          }
+        }
+        result = clone;
       }
+      tokenEst = estimateTokens(result);
     }
   }
 

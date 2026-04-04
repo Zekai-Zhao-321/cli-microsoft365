@@ -2,6 +2,15 @@
 
 Full task management via the `tasks` module of the M365 agent layer, covering both Microsoft To Do and Microsoft Planner.
 
+## Table of Contents
+- [Operations Overview](#operations-overview)
+- [Choosing the Right System](#choosing-the-right-system)
+- [Workflow: Personal Tasks with Microsoft To Do](#workflow-personal-tasks-with-microsoft-to-do)
+- [Workflow: Team Projects with Microsoft Planner](#workflow-team-projects-with-microsoft-planner)
+- [createTask — Full Parameter Reference](#createtask--full-parameter-reference)
+- [Operation Routing](#operation-routing)
+- [Error Handling](#error-handling)
+
 ## Operations Overview (17 total)
 
 | Category             | Operations                                                                           |

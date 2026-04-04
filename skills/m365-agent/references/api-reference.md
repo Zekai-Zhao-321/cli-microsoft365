@@ -2,6 +2,16 @@
 
 Full catalog of all operations available through the `m365 agent execute` command, organized by module.
 
+## Table of Contents
+- [mail (MailOperations)](#mail-mailoperations--27-operations)
+- [calendar (CalendarOperations)](#calendar-calendaroperations--13-operations)
+- [teams (TeamsOperations)](#teams-teamsoperations--18-operations)
+- [files (FilesOperations)](#files-filesoperations--18-operations)
+- [tasks (TasksOperations)](#tasks-tasksoperations--14-operations)
+- [people (PeopleOperations)](#people-peopleoperations--10-operations)
+- [search (SearchOperations)](#search-searchoperations--4-operations)
+- [Common Response Shape](#common-response-shape)
+
 ---
 
 ## mail (MailOperations) — 27 operations

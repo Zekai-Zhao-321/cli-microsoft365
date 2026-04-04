@@ -2,6 +2,17 @@
 
 Full Teams management via the `teams` module of the M365 agent layer.
 
+## Table of Contents
+- [Operations Overview](#operations-overview)
+- [Workflow: Post a Message to a Channel](#workflow-post-a-message-to-a-channel)
+- [Workflow: Read Chat History](#workflow-read-chat-history)
+- [Workflow: Create a Teams Online Meeting](#workflow-create-a-teams-online-meeting)
+- [Workflow: Manage Team Membership](#workflow-manage-team-membership)
+- [Workflow: Presence](#workflow-presence)
+- [Workflow: Meeting Transcripts & Attendance](#workflow-meeting-transcripts--attendance)
+- [Operation Routing](#operation-routing)
+- [Error Handling](#error-handling)
+
 ## Operations Overview (21 total)
 
 | Category              | Operations                                                                       |

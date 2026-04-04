@@ -1,3 +1,3 @@
 export { GraphClient } from './graph-client.js';
 export { formatForAgent, estimateTokens, selectFields, truncateString, paginateArray } from './formatter.js';
-export type { GraphResponse, AgentError, GraphRequestOptions, PaginationOptions, FormatterOptions, FormatterResult } from './types.js';
+export type { GraphResponse, AgentError, GraphRequestOptions, PaginationOptions, FormatterOptions, FormatterResult, EmailAddress, Recipient, ItemBody, Message, MailFolder, Attachment, MessageRule, OutlookCategory, DateTimeTimeZone, Event, EventAttendee, MeetingTimeSuggestion, ScheduleInformation, Team, Channel, ChatMessage, Chat, ConversationMember, OnlineMeeting, Presence, DriveItem, UploadSession, DriveItemVersion, Permission, TodoTaskList, TodoTask, PlannerPlan, PlannerBucket, PlannerTask, Person, Contact, UserProfile } from './types.js';

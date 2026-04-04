@@ -25,6 +25,16 @@ m365 login
 m365 agent status   # verify connection + available modules
 ```
 
+## Quick Start
+
+Three commands to verify everything works:
+
+```bash
+m365 agent status                                          # Check connection
+m365 agent execute --module mail --operation getUnreadCount # Read email count
+m365 agent search --module calendar                        # List calendar operations
+```
+
 ## Command Pattern
 
 ```bash
@@ -97,6 +107,27 @@ Map the user's intent to the right module and operation:
 - "Search emails about..." → `search.searchByEntityType` with `message`
 - "Search files named..." → `search.searchByEntityType` with `driveItem`
 
+## Decision Trees
+
+**Uploading a file:**
+- File < 4MB → `files.uploadSmallFile`
+- File >= 4MB → `files.createUploadSession` then loop `files.uploadLargeFileChunk`
+
+**Creating a task:**
+- Personal task → `tasks.createTask` (Microsoft To Do)
+- Team project task → `tasks.createPlannerTask` (Planner)
+
+**Searching for content:**
+- Search only emails → `mail.searchMail`
+- Search only files → `files.searchFiles`
+- Search everything → `search.searchAll`
+- Search with filters → `search.searchWithFilters`
+
+**Sending a message:**
+- Formal/external → `mail.sendMail`
+- Team channel announcement → `teams.sendChannelMessage`
+- Direct message → `teams.sendChatMessage`
+
 ## Multi-Step Workflows
 
 **Inbox triage** (Sequential Workflow pattern):
@@ -138,6 +169,14 @@ All operations return structured JSON:
 | `Authorization_RequestDenied` | Re-login with required scope |
 | `Request_ResourceNotFound` | Re-list items, use fresh ID |
 | `TooManyRequests` | Wait 30s, retry |
+
+## Common Mistakes
+
+1. **Calling createEvent without checking availability** — Use `findMeetingTimes` first to find open slots
+2. **Using uploadSmallFile for large files** — Files >4MB will fail; use `createUploadSession` + `uploadLargeFileChunk` instead
+3. **Forgetting etag for Planner updates** — `updatePlannerTask` and `deletePlannerTask` require If-Match header with the task's etag
+4. **Not parsing params as JSON** — `--params` must be valid JSON string: `--params '{"top":5}'` not `--params top=5`
+5. **Searching with wrong module** — For cross-domain search use `search.searchAll`, for email-only use `mail.searchMail`
 
 ## References
 

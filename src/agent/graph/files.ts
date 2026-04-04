@@ -87,7 +87,7 @@ export class FilesOperations {
   }
 
   public async uploadSmallFile(parentFolderId: string, fileName: string, content: Buffer): Promise<GraphResponse<any>> {
-    return (this.client as any).put(`/me/drive/items/${parentFolderId}:/${fileName}:/content`, content);
+    return this.client.put(`/me/drive/items/${parentFolderId}:/${fileName}:/content`, content);
   }
 
   public async createUploadSession(parentFolderId: string, fileName: string): Promise<GraphResponse<any>> {
@@ -95,7 +95,7 @@ export class FilesOperations {
   }
 
   public async uploadLargeFileChunk(uploadUrl: string, chunk: Buffer, rangeStart: number, rangeEnd: number, totalSize: number): Promise<GraphResponse<any>> {
-    return (this.client as any).put(uploadUrl, chunk, {
+    return this.client.put(uploadUrl, chunk, {
       'Content-Range': `bytes ${rangeStart}-${rangeEnd}/${totalSize}`
     });
   }
@@ -132,7 +132,7 @@ export class FilesOperations {
       graphOptions.top = options.top;
     }
 
-    return this.client.get(`/me/drive/search(q='${query}')`, graphOptions);
+    return this.client.get(`/me/drive/search(q='${query.replace(/'/g, "''")}')`, graphOptions);
   }
 
   public async createSharingLink(itemId: string, type: string, scope: string): Promise<GraphResponse<any>> {

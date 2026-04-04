@@ -95,7 +95,7 @@ export class PeopleOperations {
 
   public async searchUsers(query: string, options?: SearchUsersOptions): Promise<GraphResponse<any[]>> {
     const graphOptions: GraphRequestOptions = {};
-    graphOptions.filter = `startsWith(displayName,'${query}')`;
+    graphOptions.filter = `startsWith(displayName,'${query.replace(/'/g, "''")}')`;
     if (options?.top !== undefined) {
       graphOptions.top = options.top;
     }

@@ -47,15 +47,15 @@ export class TasksOperations {
   }
 
   public async updateTask(listId: string, taskId: string, updates: Record<string, any>): Promise<GraphResponse<any>> {
-    return (this.client as any).patch(`/me/todo/lists/${listId}/tasks/${taskId}`, updates);
+    return this.client.patch(`/me/todo/lists/${listId}/tasks/${taskId}`, updates);
   }
 
   public async completeTask(listId: string, taskId: string): Promise<GraphResponse<any>> {
-    return (this.client as any).patch(`/me/todo/lists/${listId}/tasks/${taskId}`, { status: 'completed' });
+    return this.client.patch(`/me/todo/lists/${listId}/tasks/${taskId}`, { status: 'completed' });
   }
 
   public async deleteTask(listId: string, taskId: string): Promise<GraphResponse<void>> {
-    return (this.client as any).delete(`/me/todo/lists/${listId}/tasks/${taskId}`);
+    return this.client.delete(`/me/todo/lists/${listId}/tasks/${taskId}`);
   }
 
   // ---------------------------------------------------------------------------
@@ -101,11 +101,11 @@ export class TasksOperations {
   }
 
   public async updatePlannerTask(taskId: string, updates: Record<string, any>, etag: string): Promise<GraphResponse<any>> {
-    return (this.client as any).patch(`/planner/tasks/${taskId}`, updates, { 'If-Match': etag });
+    return this.client.patch(`/planner/tasks/${taskId}`, updates, { 'If-Match': etag });
   }
 
   public async deletePlannerTask(taskId: string, etag: string): Promise<GraphResponse<void>> {
-    return (this.client as any).delete(`/planner/tasks/${taskId}`, { 'If-Match': etag });
+    return this.client.delete(`/planner/tasks/${taskId}`, { 'If-Match': etag });
   }
 
   public async assignPlannerTask(taskId: string, userId: string, etag: string): Promise<GraphResponse<any>> {
@@ -115,6 +115,6 @@ export class TasksOperations {
         orderHint: ' !'
       }
     };
-    return (this.client as any).patch(`/planner/tasks/${taskId}`, { assignments }, { 'If-Match': etag });
+    return this.client.patch(`/planner/tasks/${taskId}`, { assignments }, { 'If-Match': etag });
   }
 }

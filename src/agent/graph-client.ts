@@ -133,7 +133,7 @@ export class GraphClient {
     }
   }
 
-  public async patch<T = any>(endpoint: string, body: any): Promise<GraphResponse<T>> {
+  public async patch<T = any>(endpoint: string, body: any, headers?: Record<string, string>): Promise<GraphResponse<T>> {
     try {
       await this.ensureAuth();
 
@@ -143,7 +143,8 @@ export class GraphClient {
         url,
         headers: {
           accept: 'application/json',
-          'content-type': 'application/json'
+          'content-type': 'application/json',
+          ...headers
         },
         data: JSON.stringify(body),
         responseType: 'json'
@@ -220,7 +221,7 @@ export class GraphClient {
     }
   }
 
-  public async delete(endpoint: string): Promise<GraphResponse<any>> {
+  public async delete(endpoint: string, headers?: Record<string, string>): Promise<GraphResponse<any>> {
     try {
       await this.ensureAuth();
 
@@ -229,7 +230,8 @@ export class GraphClient {
       await request.delete({
         url,
         headers: {
-          accept: 'application/json'
+          accept: 'application/json',
+          ...headers
         }
       });
 

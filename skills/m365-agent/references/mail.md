@@ -2,6 +2,17 @@
 
 Full email management via the `mail` module of the M365 agent layer.
 
+## Table of Contents
+- [Operations Overview](#operations-overview)
+- [Workflow: Inbox Triage](#workflow-inbox-triage)
+- [Workflow: Send an Email](#workflow-send-an-email)
+- [Workflow: Search Mail](#workflow-search-mail)
+- [Workflow: Reply and Forward](#workflow-reply-and-forward)
+- [Workflow: Organize with Folders](#workflow-organize-with-folders)
+- [Workflow: Inbox Rules](#workflow-inbox-rules)
+- [Operation Routing](#operation-routing)
+- [Error Handling](#error-handling)
+
 ## Operations Overview (27 total)
 
 | Category       | Operations                                                                 |

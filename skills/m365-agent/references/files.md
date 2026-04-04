@@ -2,6 +2,19 @@
 
 Full file management via the `files` module of the M365 agent layer (OneDrive + SharePoint).
 
+## Table of Contents
+- [Operations Overview](#operations-overview)
+- [Workflow: Browse and Find Files](#workflow-browse-and-find-files)
+- [Workflow: Search for Files](#workflow-search-for-files)
+- [Workflow: Recent and Shared Files](#workflow-recent-and-shared-files)
+- [Workflow: Upload a File](#workflow-upload-a-file)
+- [Workflow: Share a File](#workflow-share-a-file)
+- [Workflow: Manage Files and Folders](#workflow-manage-files-and-folders)
+- [Workflow: Version History](#workflow-version-history)
+- [Workflow: SharePoint Drive Files](#workflow-sharepoint-drive-files)
+- [Operation Routing](#operation-routing)
+- [Error Handling](#error-handling)
+
 ## Operations Overview (18 total)
 
 | Category     | Operations                                                                        |
