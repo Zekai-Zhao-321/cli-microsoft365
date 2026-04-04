@@ -138,6 +138,37 @@ describe('SearchOperations', () => {
       const request = body.requests[0];
       assert.strictEqual(request.size, 25);
     });
+
+    it('should search with a single entity type when provided', async () => {
+      client.post.resolves(makeSearchResponse([]));
+
+      await search.searchAll('project', { entityTypes: ['event'] });
+
+      const [, body] = client.post.firstCall.args;
+      const request = body.requests[0];
+      assert.deepStrictEqual(request.entityTypes, ['event']);
+    });
+
+    it('should still make the request when query is an empty string', async () => {
+      client.post.resolves(makeSearchResponse([]));
+
+      await search.searchAll('');
+
+      assert(client.post.calledOnce);
+      const [, body] = client.post.firstCall.args;
+      assert.strictEqual(body.requests[0].query.queryString, '');
+    });
+
+    it('should return error data array and error info on failure', async () => {
+      client.post.resolves(makeErrorResponse('Search failed', 'ServiceUnavailable'));
+
+      const result = await search.searchAll('test');
+
+      assert.strictEqual(result.success, false);
+      assert.deepStrictEqual(result.data, []);
+      assert(result.error !== undefined);
+      assert.strictEqual(result.error!.code, 'ServiceUnavailable');
+    });
   });
 
   describe('searchByEntityType', () => {
@@ -183,6 +214,27 @@ describe('SearchOperations', () => {
 
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.data.length, 2);
+    });
+
+    it('should still make the request even with an unusual entity type value', async () => {
+      client.post.resolves(makeSearchResponse([]));
+
+      // Cast to bypass TypeScript — Graph API itself will validate
+      await search.searchByEntityType('test', 'site' as any);
+
+      assert(client.post.calledOnce);
+      const [, body] = client.post.firstCall.args;
+      assert.deepStrictEqual(body.requests[0].entityTypes, ['site']);
+    });
+
+    it('should propagate error when searchByEntityType fails', async () => {
+      client.post.resolves(makeErrorResponse('Search unavailable', 'ServiceUnavailable'));
+
+      const result = await search.searchByEntityType('query', 'message');
+
+      assert.strictEqual(result.success, false);
+      assert.deepStrictEqual(result.data, []);
+      assert(result.error !== undefined);
     });
   });
 
@@ -252,6 +304,53 @@ describe('SearchOperations', () => {
 
       const [, body] = client.post.firstCall.args;
       assert.strictEqual(body.requests[0].size, 15);
+    });
+
+    it('should build KQL query with only dateRange filter', async () => {
+      client.post.resolves(makeSearchResponse([]));
+
+      await search.searchWithFilters('invoice', { dateRange: { start: '2025-01-01', end: '2025-03-31' } });
+
+      const [, body] = client.post.firstCall.args;
+      const queryString: string = body.requests[0].query.queryString;
+      assert(queryString.startsWith('invoice'), `Expected original query at start: ${queryString}`);
+      assert(queryString.includes('received>='), `Expected received>= KQL syntax: ${queryString}`);
+      assert(queryString.includes('received<='), `Expected received<= KQL syntax: ${queryString}`);
+      assert(queryString.includes('2025-01-01'), `Expected start date: ${queryString}`);
+      assert(queryString.includes('2025-03-31'), `Expected end date: ${queryString}`);
+    });
+
+    it('should build KQL query with only from filter', async () => {
+      client.post.resolves(makeSearchResponse([]));
+
+      await search.searchWithFilters('hello', { from: 'boss@company.com' });
+
+      const [, body] = client.post.firstCall.args;
+      const queryString: string = body.requests[0].query.queryString;
+      assert(queryString.includes('from:boss@company.com'), `Expected from: KQL syntax: ${queryString}`);
+      assert(!queryString.includes('received'), `Did not expect date filter: ${queryString}`);
+    });
+
+    it('should pass through special characters in query string without modification', async () => {
+      client.post.resolves(makeSearchResponse([]));
+
+      const specialQuery = 'subject:"Q1 Report (2025)" AND from:cfo@org.com';
+      await search.searchWithFilters(specialQuery, {});
+
+      const [, body] = client.post.firstCall.args;
+      const queryString: string = body.requests[0].query.queryString;
+      assert(queryString.startsWith(specialQuery), `Expected special chars preserved: ${queryString}`);
+    });
+
+    it('should propagate error when searchWithFilters API call fails', async () => {
+      client.post.resolves(makeErrorResponse('Quota exceeded', 'QuotaReached'));
+
+      const result = await search.searchWithFilters('test', { from: 'a@b.com' });
+
+      assert.strictEqual(result.success, false);
+      assert.deepStrictEqual(result.data, []);
+      assert(result.error !== undefined);
+      assert.strictEqual(result.error!.code, 'QuotaReached');
     });
   });
 
@@ -332,6 +431,31 @@ describe('SearchOperations', () => {
 
       const [, body] = client.post.firstCall.args;
       assert.deepStrictEqual(body.requests[0].entityTypes, ['event']);
+    });
+
+    it('should still make the request when query is an empty string', async () => {
+      client.post.resolves({
+        success: true,
+        data: { value: [] },
+        tokenEstimate: 10
+      });
+
+      await search.getSearchSuggestions('');
+
+      assert(client.post.calledOnce);
+      const [, body] = client.post.firstCall.args;
+      assert.strictEqual(body.requests[0].query.queryString, '');
+    });
+
+    it('should propagate error when getSearchSuggestions API call fails', async () => {
+      client.post.resolves(makeErrorResponse('Internal server error', 'InternalServerError'));
+
+      const result = await search.getSearchSuggestions('test');
+
+      assert.strictEqual(result.success, false);
+      assert.deepStrictEqual(result.data, []);
+      assert(result.error !== undefined);
+      assert.strictEqual(result.error!.code, 'InternalServerError');
     });
   });
 });
