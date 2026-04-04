@@ -138,6 +138,25 @@ describe('CalendarOperations', () => {
       assert.strictEqual(result.success, true);
       assert.deepStrictEqual(result.data, []);
     });
+
+    it('should build combined filter when all filter options are populated', async () => {
+      client.get.resolves(makeEventResponse([]));
+
+      await calendar.listEvents({
+        startDate: '2026-04-01T00:00:00Z',
+        endDate: '2026-04-30T23:59:59Z',
+        top: 20,
+        select: ['id', 'subject', 'start', 'end', 'location']
+      });
+
+      const [, opts] = client.get.firstCall.args;
+      assert(opts !== undefined);
+      assert(opts!.filter !== undefined);
+      assert((opts!.filter as string).includes('2026-04-01'), `Expected start date in filter: ${opts!.filter}`);
+      assert((opts!.filter as string).includes('2026-04-30'), `Expected end date in filter: ${opts!.filter}`);
+      assert.strictEqual(opts!.top, 20);
+      assert.deepStrictEqual(opts!.select, ['id', 'subject', 'start', 'end', 'location']);
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -251,6 +270,17 @@ describe('CalendarOperations', () => {
 
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.data[0].type, 'occurrence');
+    });
+
+    it('should work when start and end date are the same', async () => {
+      client.get.resolves(makeEventResponse([]));
+
+      await calendar.getCalendarView('2026-04-01T00:00:00Z', '2026-04-01T00:00:00Z');
+
+      assert(client.get.calledOnce);
+      const [endpoint] = client.get.firstCall.args;
+      assert(endpoint.includes('startDateTime='), `Expected startDateTime in endpoint: ${endpoint}`);
+      assert(endpoint.includes('endDateTime='), `Expected endDateTime in endpoint: ${endpoint}`);
     });
   });
 
@@ -375,6 +405,17 @@ describe('CalendarOperations', () => {
 
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.data.length, 1);
+    });
+
+    it('should handle 0 hours edge case (start and end are essentially equal)', async () => {
+      client.get.resolves(makeEventResponse([]));
+
+      await calendar.getUpcoming(0);
+
+      assert(client.get.calledOnce);
+      const [endpoint] = client.get.firstCall.args;
+      assert(endpoint.includes('startDateTime='), `Expected startDateTime in endpoint: ${endpoint}`);
+      assert(endpoint.includes('endDateTime='), `Expected endDateTime in endpoint: ${endpoint}`);
     });
   });
 
@@ -824,6 +865,34 @@ describe('CalendarOperations', () => {
       assert.strictEqual(result.success, true);
       assert.deepStrictEqual(result.data, []);
     });
+
+    it('should still make the request with empty attendees array', async () => {
+      client.post.resolves({
+        success: true,
+        data: { meetingTimeSuggestions: [], emptySuggestionsHint: '' },
+        tokenEstimate: 30
+      });
+
+      await calendar.findMeetingTimes({ attendees: [], meetingDuration: 'PT1H' });
+
+      assert(client.post.calledOnce);
+      const [endpoint, body] = client.post.firstCall.args;
+      assert.strictEqual(endpoint, '/me/findMeetingTimes');
+      assert.deepStrictEqual(body.attendees, []);
+    });
+
+    it('should propagate error when findMeetingTimes fails', async () => {
+      client.post.resolves({
+        success: false,
+        data: undefined as any,
+        tokenEstimate: 0,
+        error: { message: 'Service error', code: 'ServiceUnavailable' }
+      });
+
+      const result = await calendar.findMeetingTimes(meetingParams);
+
+      assert.strictEqual(result.success, false);
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -915,6 +984,31 @@ describe('CalendarOperations', () => {
       assert.strictEqual(result.success, true);
       const firstSchedule = result.data[0] as any;
       assert(firstSchedule.availabilityView !== undefined);
+    });
+
+    it('should still make the request when schedules array is empty', async () => {
+      client.post.resolves({
+        success: true,
+        data: { value: [] },
+        tokenEstimate: 10
+      });
+
+      await calendar.getSchedule([], startDate, endDate);
+
+      assert(client.post.calledOnce);
+      const [endpoint, body] = client.post.firstCall.args;
+      assert.strictEqual(endpoint, '/me/calendar/getSchedule');
+      assert.deepStrictEqual(body.schedules, []);
+    });
+
+    it('should propagate error when getSchedule API call fails', async () => {
+      client.post.resolves(makeErrorResponse('Forbidden', 'AccessDenied'));
+
+      const result = await calendar.getSchedule(emails, startDate, endDate);
+
+      assert.strictEqual(result.success, false);
+      assert(result.error !== undefined);
+      assert.strictEqual(result.error!.code, 'AccessDenied');
     });
   });
 });
