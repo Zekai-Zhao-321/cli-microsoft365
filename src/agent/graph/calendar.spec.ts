@@ -472,6 +472,49 @@ describe('CalendarOperations', () => {
       assert(result.error !== undefined);
       assert.strictEqual(result.error!.code, 'Authorization_RequestDenied');
     });
+
+    it('should still create event with past dates (Graph accepts it)', async () => {
+      const pastEvent = {
+        subject: 'Past Meeting',
+        start: { dateTime: '2020-01-01T10:00:00', timeZone: 'UTC' },
+        end: { dateTime: '2020-01-01T11:00:00', timeZone: 'UTC' }
+      };
+      client.post.resolves(makeSingleEventResponse({ ...pastEvent, id: 'past-event-1' }));
+
+      const result = await calendar.createEvent(pastEvent);
+
+      assert.strictEqual(result.success, true);
+      assert.strictEqual(result.data.id, 'past-event-1');
+    });
+
+    it('should send full body when all optional fields are populated', async () => {
+      const fullEvent = {
+        subject: 'Full Event',
+        start: { dateTime: '2026-05-01T09:00:00', timeZone: 'UTC' },
+        end: { dateTime: '2026-05-01T10:00:00', timeZone: 'UTC' },
+        location: { displayName: 'Board Room' },
+        body: { contentType: 'HTML', content: '<b>Agenda</b>' },
+        isOnlineMeeting: true,
+        recurrence: {
+          pattern: { type: 'daily', interval: 1 },
+          range: { type: 'numbered', startDate: '2026-05-01', numberOfOccurrences: 5 }
+        },
+        attendees: [
+          { emailAddress: { address: 'a@test.com', name: 'A' }, type: 'required' },
+          { emailAddress: { address: 'b@test.com', name: 'B' }, type: 'optional' }
+        ]
+      };
+      client.post.resolves(makeSingleEventResponse({ ...fullEvent, id: 'full-event-1' }));
+
+      await calendar.createEvent(fullEvent);
+
+      const [, body] = client.post.firstCall.args;
+      assert.strictEqual(body.location.displayName, 'Board Room');
+      assert.strictEqual(body.body.contentType, 'HTML');
+      assert.strictEqual(body.isOnlineMeeting, true);
+      assert(body.recurrence !== undefined);
+      assert.strictEqual(body.attendees.length, 2);
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -520,6 +563,16 @@ describe('CalendarOperations', () => {
       const [, body] = client.patch.firstCall.args;
       assert.strictEqual(body.attendees[0].emailAddress.address, 'new@contoso.com');
     });
+
+    it('should propagate 404 when event does not exist', async () => {
+      client.patch.resolves(makeErrorResponse('The specified object was not found in the store.', 'ErrorItemNotFound'));
+
+      const result = await calendar.updateEvent('nonexistent-event', { subject: 'Updated' });
+
+      assert.strictEqual(result.success, false);
+      assert(result.error !== undefined);
+      assert.strictEqual(result.error!.code, 'ErrorItemNotFound');
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -542,6 +595,16 @@ describe('CalendarOperations', () => {
       const result = await calendar.deleteEvent('event-1');
 
       assert.strictEqual(result.success, true);
+    });
+
+    it('should propagate 404 when event does not exist', async () => {
+      client.delete.resolves(makeErrorResponse('The specified object was not found in the store.', 'ErrorItemNotFound'));
+
+      const result = await calendar.deleteEvent('nonexistent-event');
+
+      assert.strictEqual(result.success, false);
+      assert(result.error !== undefined);
+      assert.strictEqual(result.error!.code, 'ErrorItemNotFound');
     });
   });
 
@@ -583,6 +646,16 @@ describe('CalendarOperations', () => {
 
       const [, body] = client.post.firstCall.args;
       assert.strictEqual(body.sendResponse, true);
+    });
+
+    it('should propagate error when event does not exist', async () => {
+      client.post.resolves(makeErrorResponse('The specified object was not found in the store.', 'ErrorItemNotFound'));
+
+      const result = await calendar.acceptEvent('nonexistent-event');
+
+      assert.strictEqual(result.success, false);
+      assert(result.error !== undefined);
+      assert.strictEqual(result.error!.code, 'ErrorItemNotFound');
     });
   });
 

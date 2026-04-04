@@ -143,6 +143,13 @@ describe('TeamsOperations', () => {
       assert.strictEqual(result.success, false);
       assert(result.error !== undefined);
     });
+
+    it('should propagate rejection when client.get rejects', async () => {
+      const err = new Error('Network error');
+      client.get.rejects(err);
+
+      await assert.rejects(() => teams.listMyTeams(), /Network error/);
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -177,6 +184,13 @@ describe('TeamsOperations', () => {
       assert.strictEqual(result.success, false);
       assert(result.error !== undefined);
       assert.strictEqual(result.error!.code, 'ErrorItemNotFound');
+    });
+
+    it('should propagate rejection when client.get rejects', async () => {
+      const err = new Error('Service unavailable');
+      client.get.rejects(err);
+
+      await assert.rejects(() => teams.getTeam('team-1'), /Service unavailable/);
     });
   });
 
@@ -233,6 +247,22 @@ describe('TeamsOperations', () => {
       const result = await teams.createTeam(createParams);
 
       assert.strictEqual(result.success, true);
+    });
+
+    it('should return error response on failure', async () => {
+      client.post.resolves(makeErrorResponse('Conflict', 'Conflict'));
+
+      const result = await teams.createTeam(createParams);
+
+      assert.strictEqual(result.success, false);
+      assert(result.error !== undefined);
+    });
+
+    it('should propagate rejection when client.post rejects', async () => {
+      const err = new Error('Timeout');
+      client.post.rejects(err);
+
+      await assert.rejects(() => teams.createTeam(createParams), /Timeout/);
     });
   });
 
@@ -299,6 +329,21 @@ describe('TeamsOperations', () => {
 
       assert.strictEqual(result.success, true);
       assert.deepStrictEqual(result.data, []);
+    });
+
+    it('should return error response on failure', async () => {
+      client.get.resolves(makeErrorResponse('Team not found', 'ErrorItemNotFound'));
+
+      const result = await teams.listChannels('non-existent-team');
+
+      assert.strictEqual(result.success, false);
+      assert(result.error !== undefined);
+    });
+
+    it('should propagate rejection when client.get rejects', async () => {
+      client.get.rejects(new Error('Forbidden'));
+
+      await assert.rejects(() => teams.listChannels('team-1'), /Forbidden/);
     });
   });
 
@@ -389,6 +434,21 @@ describe('TeamsOperations', () => {
       const result = await teams.createChannel('team-1', channelParams);
 
       assert.strictEqual(result.success, true);
+    });
+
+    it('should return error response on failure', async () => {
+      client.post.resolves(makeErrorResponse('Channel already exists', 'Conflict'));
+
+      const result = await teams.createChannel('team-1', channelParams);
+
+      assert.strictEqual(result.success, false);
+      assert(result.error !== undefined);
+    });
+
+    it('should propagate rejection when client.post rejects', async () => {
+      client.post.rejects(new Error('Network error'));
+
+      await assert.rejects(() => teams.createChannel('team-1', channelParams), /Network error/);
     });
   });
 

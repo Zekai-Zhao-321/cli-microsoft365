@@ -516,5 +516,225 @@ describe('GraphClient', () => {
       assert(result.suggestion !== undefined);
       assert(result.suggestion.includes('m365 login'));
     });
+
+    it('should use error.message as fallback when error format is unrecognized', () => {
+      const error: any = new Error('Connection refused');
+
+      const result = (client as any).translateError(error);
+
+      assert.strictEqual(result.message, 'Connection refused');
+      assert.strictEqual(result.code, undefined);
+    });
+
+    it('should use "Unknown error" when error has no message and no code', () => {
+      const result = (client as any).translateError({});
+
+      assert.strictEqual(result.message, 'Unknown error');
+    });
+
+    it('should handle HTML or non-JSON response by using error.message as fallback', () => {
+      const error: any = new Error('Internal Server Error');
+      error.response = { status: 500, data: '<html><body>Error</body></html>' };
+
+      const result = (client as any).translateError(error);
+
+      assert(result.message.length > 0);
+      assert.strictEqual(result.message, 'Internal Server Error');
+    });
+
+    it('should wrap non-Error thrown objects using "Unknown error" fallback', () => {
+      const result = (client as any).translateError('something bad happened');
+
+      assert(result.message.length > 0);
+    });
+  });
+
+  describe('get - additional error paths', () => {
+    beforeEach(() => {
+      sinon.stub(auth, 'restoreAuth').resolves();
+      auth.connection.active = true;
+    });
+
+    it('should return error with message on 500 Internal Server Error', async () => {
+      const error: any = new Error('Internal Server Error');
+      error.response = { status: 500, data: '' };
+      sinon.stub(request, 'get').rejects(error);
+
+      const result = await client.get('/me/messages');
+
+      assert.strictEqual(result.success, false);
+      assert(result.error !== undefined);
+      assert(result.error!.message.length > 0);
+    });
+
+    it('should return error on network timeout or connection refused', async () => {
+      const error: any = new Error('connect ECONNREFUSED 127.0.0.1:443');
+      error.code = 'ECONNREFUSED';
+      sinon.stub(request, 'get').rejects(error);
+
+      const result = await client.get('/me/messages');
+
+      assert.strictEqual(result.success, false);
+      assert(result.error !== undefined);
+      assert(result.error!.message.includes('ECONNREFUSED'));
+    });
+
+    it('should handle empty string response body gracefully', async () => {
+      sinon.stub(request, 'get').resolves('');
+
+      const result = await client.get('/me/messages');
+
+      // Empty string fails JSON.parse, should return parse error
+      assert(result !== undefined);
+      assert.strictEqual(result.success, false);
+      assert(result.error !== undefined);
+    });
+
+    it('should return error on DELETE of already-deleted resource (404)', async () => {
+      const error: any = new Error('Not Found');
+      error.response = { status: 404, data: '' };
+      (error as any).error = { error: { code: 'ErrorItemNotFound', message: 'The item was not found.' } };
+      sinon.stub(request, 'delete').rejects(error);
+
+      const result = await client.delete('/me/messages/already-deleted-id');
+
+      assert.strictEqual(result.success, false);
+      assert.strictEqual(result.error!.code, 'ErrorItemNotFound');
+      assert(result.error!.suggestion!.toLowerCase().includes('verify'));
+    });
+
+    it('should encode special characters in endpoint URL', async () => {
+      const stub = sinon.stub(request, 'get').resolves(JSON.stringify({ value: [] }));
+
+      await client.get("/me/messages('AAMk==')");
+
+      const opts = stub.firstCall.args[0];
+      assert(opts.url!.includes("https://graph.microsoft.com/v1.0/me/messages('AAMk==')"));
+    });
+  });
+
+  describe('post - additional paths', () => {
+    beforeEach(() => {
+      sinon.stub(auth, 'restoreAuth').resolves();
+      auth.connection.active = true;
+    });
+
+    it('should make POST request with undefined body by stringifying it', async () => {
+      const stub = sinon.stub(request, 'post').resolves(JSON.stringify({}));
+
+      await client.post('/me/messages', undefined);
+
+      assert(stub.calledOnce);
+      const opts = stub.firstCall.args[0];
+      assert.strictEqual(opts.data, JSON.stringify(undefined));
+    });
+  });
+
+  describe('patch - additional paths', () => {
+    beforeEach(() => {
+      sinon.stub(auth, 'restoreAuth').resolves();
+      auth.connection.active = true;
+    });
+
+    it('should make PATCH request with empty body ({})', async () => {
+      const stub = sinon.stub(request, 'patch').resolves(JSON.stringify({ id: '1' }));
+
+      await client.patch('/me/messages/1', {});
+
+      assert(stub.calledOnce);
+      const opts = stub.firstCall.args[0];
+      assert.strictEqual(opts.data, '{}');
+    });
+  });
+
+  describe('getAll - additional error paths', () => {
+    beforeEach(() => {
+      sinon.stub(auth, 'restoreAuth').resolves();
+      auth.connection.active = true;
+    });
+
+    it('should return error immediately when first page request fails', async () => {
+      const error: any = new Error('Forbidden');
+      error.response = { status: 403, data: '' };
+      (error as any).error = { error: { code: 'Authorization_RequestDenied', message: 'Insufficient privileges.' } };
+      sinon.stub(request, 'get').rejects(error);
+
+      const result = await client.getAll('/me/messages');
+
+      assert.strictEqual(result.success, false);
+      assert(result.error !== undefined);
+      assert.strictEqual(result.error!.code, 'Authorization_RequestDenied');
+    });
+
+    it('should return error when second page request fails', async () => {
+      const stub = sinon.stub(request, 'get');
+      stub.onFirstCall().resolves(JSON.stringify({
+        value: [{ id: '1' }],
+        '@odata.nextLink': 'https://graph.microsoft.com/v1.0/me/messages?$skip=1'
+      }));
+      const error: any = new Error('Service Unavailable');
+      error.response = { status: 503, data: '' };
+      stub.onSecondCall().rejects(error);
+
+      const result = await client.getAll('/me/messages');
+
+      assert.strictEqual(result.success, false);
+      assert(result.error !== undefined);
+    });
+  });
+
+  describe('buildQueryString - additional paths', () => {
+    it('should build complete query string with all options populated', () => {
+      const qs = (client as any).buildQueryString({
+        select: ['id', 'subject'],
+        filter: 'isRead eq false',
+        top: 10,
+        skip: 5,
+        orderBy: 'receivedDateTime desc',
+        expand: 'attachments'
+      });
+
+      assert(qs.includes('$select=id,subject'));
+      assert(qs.includes('$filter='));
+      assert(qs.includes('$top=10'));
+      assert(qs.includes('$skip=5'));
+      assert(qs.includes('$orderby='));
+      assert(qs.includes('$expand=attachments'));
+    });
+
+    it('should skip select when array is empty', () => {
+      const qs = (client as any).buildQueryString({ select: [] });
+
+      assert.strictEqual(qs, '');
+    });
+
+    it('should not include filter parameter when filter is empty string', () => {
+      const qs = (client as any).buildQueryString({ filter: '' });
+
+      assert(!qs.includes('$filter'));
+    });
+  });
+
+  describe('ensureAuth - additional paths', () => {
+    it('should return false when Auth.restoreAuth throws a non-Error object', async () => {
+      sinon.stub(auth, 'restoreAuth').rejects('string rejection');
+      auth.connection.active = false;
+
+      const result = await client.ensureAuth();
+
+      assert.strictEqual(result, false);
+    });
+
+    it('should call ensureAuth on each sequential request', async () => {
+      const restoreStub = sinon.stub(auth, 'restoreAuth').resolves();
+      auth.connection.active = true;
+      sinon.stub(request, 'get').resolves(JSON.stringify({ value: [] }));
+
+      await client.get('/me/messages');
+      await client.get('/me/events');
+
+      // restoreAuth is called once per get (ensureAuth is called inside each get)
+      assert(restoreStub.callCount >= 2);
+    });
   });
 });

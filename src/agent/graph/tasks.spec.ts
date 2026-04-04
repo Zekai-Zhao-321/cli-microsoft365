@@ -716,4 +716,237 @@ describe('TasksOperations', () => {
       assert(result.data.assignments['user-2'] !== undefined);
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // Error propagation – rejects (thrown errors)
+  // ---------------------------------------------------------------------------
+  describe('error propagation - rejects', () => {
+    it('listTaskLists should propagate rejection from client', async () => {
+      client.get.rejects(new Error('Network failure'));
+
+      await assert.rejects(() => tasks.listTaskLists(), /Network failure/);
+    });
+
+    it('getTaskList should propagate rejection from client', async () => {
+      client.get.rejects(new Error('Not found'));
+
+      await assert.rejects(() => tasks.getTaskList('list-1'), /Not found/);
+    });
+
+    it('createTaskList should propagate rejection from client', async () => {
+      client.post.rejects(new Error('Quota exceeded'));
+
+      await assert.rejects(() => tasks.createTaskList('New List'), /Quota exceeded/);
+    });
+
+    it('listTasks should propagate rejection from client', async () => {
+      client.get.rejects(new Error('Service unavailable'));
+
+      await assert.rejects(() => tasks.listTasks('list-1'), /Service unavailable/);
+    });
+
+    it('getTask should propagate rejection from client', async () => {
+      client.get.rejects(new Error('Timeout'));
+
+      await assert.rejects(() => tasks.getTask('list-1', 'task-1'), /Timeout/);
+    });
+
+    it('createTask should propagate rejection from client', async () => {
+      client.post.rejects(new Error('Bad request'));
+
+      await assert.rejects(() => tasks.createTask('list-1', { title: 'Test' }), /Bad request/);
+    });
+
+    it('updateTask should propagate rejection from client', async () => {
+      (client as any).patch.rejects(new Error('Conflict'));
+
+      await assert.rejects(() => tasks.updateTask('list-1', 'task-1', { title: 'X' }), /Conflict/);
+    });
+
+    it('completeTask should propagate rejection from client', async () => {
+      (client as any).patch.rejects(new Error('Permission denied'));
+
+      await assert.rejects(() => tasks.completeTask('list-1', 'task-1'), /Permission denied/);
+    });
+
+    it('deleteTask should propagate rejection from client', async () => {
+      (client as any).delete.rejects(new Error('Not found'));
+
+      await assert.rejects(() => tasks.deleteTask('list-1', 'task-1'), /Not found/);
+    });
+
+    it('listPlansForGroup should propagate rejection from client', async () => {
+      client.get.rejects(new Error('Group not found'));
+
+      await assert.rejects(() => tasks.listPlansForGroup('group-1'), /Group not found/);
+    });
+
+    it('getPlan should propagate rejection from client', async () => {
+      client.get.rejects(new Error('Forbidden'));
+
+      await assert.rejects(() => tasks.getPlan('plan-1'), /Forbidden/);
+    });
+
+    it('listBuckets should propagate rejection from client', async () => {
+      client.get.rejects(new Error('Plan not found'));
+
+      await assert.rejects(() => tasks.listBuckets('plan-1'), /Plan not found/);
+    });
+
+    it('listTasksInPlan should propagate rejection from client', async () => {
+      client.get.rejects(new Error('Unauthorized'));
+
+      await assert.rejects(() => tasks.listTasksInPlan('plan-1'), /Unauthorized/);
+    });
+
+    it('getPlannerTask should propagate rejection from client', async () => {
+      client.get.rejects(new Error('Task not found'));
+
+      await assert.rejects(() => tasks.getPlannerTask('ptask-1'), /Task not found/);
+    });
+
+    it('createPlannerTask should propagate rejection from client', async () => {
+      client.post.rejects(new Error('Plan not found'));
+
+      await assert.rejects(
+        () => tasks.createPlannerTask({ planId: 'plan-1', bucketId: 'bucket-1', title: 'Task' }),
+        /Plan not found/
+      );
+    });
+
+    it('updatePlannerTask should propagate rejection on etag mismatch', async () => {
+      (client as any).patch.rejects(new Error('Precondition Failed'));
+
+      const staleEtag = 'W/"outdated-etag"';
+      await assert.rejects(
+        () => tasks.updatePlannerTask('ptask-1', { title: 'X' }, staleEtag),
+        /Precondition Failed/
+      );
+    });
+
+    it('deletePlannerTask should propagate rejection from client', async () => {
+      (client as any).delete.rejects(new Error('Etag mismatch'));
+
+      await assert.rejects(
+        () => tasks.deletePlannerTask('ptask-1', 'W/"bad-etag"'),
+        /Etag mismatch/
+      );
+    });
+
+    it('assignPlannerTask should propagate rejection from client', async () => {
+      (client as any).patch.rejects(new Error('Assignment failed'));
+
+      await assert.rejects(
+        () => tasks.assignPlannerTask('ptask-1', 'user-1', 'W/"etag"'),
+        /Assignment failed/
+      );
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Edge cases
+  // ---------------------------------------------------------------------------
+  describe('edge cases', () => {
+    it('createTask with all optional fields should send full body', async () => {
+      const taskParams = {
+        title: 'Full task',
+        body: { content: 'Task body content', contentType: 'text' },
+        dueDateTime: { dateTime: '2026-05-01T00:00:00', timeZone: 'UTC' },
+        importance: 'high',
+        reminderDateTime: { dateTime: '2026-04-30T09:00:00', timeZone: 'UTC' }
+      };
+      client.post.resolves(makeResponse({ id: 'task-full', ...taskParams }));
+
+      await tasks.createTask('list-1', taskParams);
+
+      const [, body] = client.post.firstCall.args;
+      assert.strictEqual(body.title, 'Full task');
+      assert.deepStrictEqual(body.body, taskParams.body);
+      assert.deepStrictEqual(body.dueDateTime, taskParams.dueDateTime);
+      assert.strictEqual(body.importance, 'high');
+      assert.deepStrictEqual(body.reminderDateTime, taskParams.reminderDateTime);
+    });
+
+    it('updateTask with minimal update (just status) should send only status in body', async () => {
+      (client as any).patch.resolves(makeResponse({ ...sampleTask, status: 'inProgress' }));
+
+      await tasks.updateTask('list-1', 'task-1', { status: 'inProgress' });
+
+      const [, body] = (client as any).patch.firstCall.args;
+      assert.strictEqual(body.status, 'inProgress');
+    });
+
+    it('completeTask should send status: completed in PATCH body', async () => {
+      (client as any).patch.resolves(makeResponse({ ...sampleTask, status: 'completed' }));
+
+      await tasks.completeTask('list-1', 'task-1');
+
+      const [, body] = (client as any).patch.firstCall.args;
+      assert.deepStrictEqual(body, { status: 'completed' });
+    });
+
+    it('updatePlannerTask should pass the If-Match header correctly', async () => {
+      const etag = 'W/"JzEtVGFzayAgQEBAQEBAQEBAQEBAQEBAWCc="';
+      (client as any).patch.resolves(makeResponse({ ...samplePlannerTask, percentComplete: 75 }));
+
+      await tasks.updatePlannerTask('ptask-1', { percentComplete: 75 }, etag);
+
+      const [, , headers] = (client as any).patch.firstCall.args;
+      assert.strictEqual(headers['If-Match'], etag);
+    });
+
+    it('deletePlannerTask should pass the If-Match header correctly', async () => {
+      const etag = 'W/"JzEtVGFzayAgQEBAQEBAQEBAQEBAQEBAWCc="';
+      (client as any).delete.resolves(makeVoidResponse());
+
+      await tasks.deletePlannerTask('ptask-1', etag);
+
+      const [, headers] = (client as any).delete.firstCall.args;
+      assert.strictEqual(headers['If-Match'], etag);
+    });
+
+    it('assignPlannerTask should send correct assignments body format', async () => {
+      const etag = 'W/"JzEtVGFzayAgQEBAQEBAQEBAQEBAQEBAWCc="';
+      (client as any).patch.resolves(makeResponse({ ...samplePlannerTask }));
+
+      await tasks.assignPlannerTask('ptask-1', 'user-abc', etag);
+
+      const [, body] = (client as any).patch.firstCall.args;
+      assert(body.assignments !== undefined);
+      assert.deepStrictEqual(body.assignments['user-abc'], {
+        '@odata.type': '#microsoft.graph.plannerAssignment',
+        orderHint: ' !'
+      });
+    });
+
+    it('createPlannerTask with all fields should include bucketId, assignments, and dueDateTime in body', async () => {
+      const params = {
+        planId: 'plan-1',
+        bucketId: 'bucket-2',
+        title: 'Full planner task',
+        dueDateTime: '2026-06-01T00:00:00Z',
+        assignments: {
+          'user-x': { '@odata.type': '#microsoft.graph.plannerAssignment', orderHint: ' !' }
+        }
+      };
+      client.post.resolves(makeResponse({ id: 'ptask-new', ...params }));
+
+      await tasks.createPlannerTask(params);
+
+      const [, body] = client.post.firstCall.args;
+      assert.strictEqual(body.bucketId, 'bucket-2');
+      assert.strictEqual(body.dueDateTime, '2026-06-01T00:00:00Z');
+      assert.deepStrictEqual(body.assignments, params.assignments);
+    });
+
+    it('listTasks with top and filter options should pass query options to client', async () => {
+      client.get.resolves(makeResponse([]));
+
+      await tasks.listTasks('list-1', { top: 25, filter: "status eq 'notStarted'" });
+
+      const [, opts] = client.get.firstCall.args;
+      assert.strictEqual(opts!.top, 25);
+      assert.strictEqual(opts!.filter, "status eq 'notStarted'");
+    });
+  });
 });

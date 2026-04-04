@@ -665,5 +665,221 @@ describe('PeopleOperations', () => {
       assert.strictEqual(result.success, false);
       assert(result.error !== undefined);
     });
+
+    it('should use default photo endpoint when no size is provided', async () => {
+      client.get.resolves(makeResponse(Buffer.from('photo-data')));
+
+      await people.getUserPhoto('user-1');
+
+      const [endpoint] = client.get.firstCall.args;
+      assert.strictEqual(endpoint, '/users/user-1/photo/$value');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Additional error propagation tests
+  // ---------------------------------------------------------------------------
+  describe('listRelevantPeople – error propagation', () => {
+    it('should propagate thrown error from client.get', async () => {
+      client.get.rejects(new Error('Network error'));
+
+      await assert.rejects(() => people.listRelevantPeople(), /Network error/);
+    });
+
+    it('should pass top parameter in query options', async () => {
+      client.get.resolves(makeResponse([]));
+
+      await people.listRelevantPeople({ top: 5 });
+
+      const [, opts] = client.get.firstCall.args;
+      assert.strictEqual(opts!.top, 5);
+    });
+  });
+
+  describe('searchPeople – error propagation and edge cases', () => {
+    it('should propagate thrown error from client.get', async () => {
+      client.get.rejects(new Error('Service error'));
+
+      await assert.rejects(() => people.searchPeople('Alice'), /Service error/);
+    });
+
+    it('should escape single quotes in query when building search param', async () => {
+      client.get.resolves(makeResponse([]));
+
+      // The query is wrapped in double quotes as `"${query}"` — single quotes are not escaped in searchPeople
+      // but we verify the search param contains the query text
+      await people.searchPeople("O'Brien");
+
+      const [, opts] = client.get.firstCall.args;
+      assert((opts as any).search !== undefined);
+      assert((opts as any).search.includes("O'Brien"));
+    });
+  });
+
+  describe('listContacts – error propagation', () => {
+    it('should propagate thrown error from client.get', async () => {
+      client.get.rejects(new Error('Timeout'));
+
+      await assert.rejects(() => people.listContacts(), /Timeout/);
+    });
+  });
+
+  describe('getContact – error propagation', () => {
+    it('should propagate thrown error from client.get', async () => {
+      client.get.rejects(new Error('Connection refused'));
+
+      await assert.rejects(() => people.getContact('contact-1'), /Connection refused/);
+    });
+  });
+
+  describe('createContact – error propagation and edge cases', () => {
+    it('should propagate thrown error from client.post', async () => {
+      client.post.rejects(new Error('Post failed'));
+
+      await assert.rejects(() => people.createContact({ givenName: 'Bob' }), /Post failed/);
+    });
+
+    it('should create contact with minimal fields (just givenName)', async () => {
+      const minimalContact = { id: 'c-2', givenName: 'Minimal' };
+      client.post.resolves(makeResponse(minimalContact));
+
+      await people.createContact({ givenName: 'Minimal' });
+
+      const [endpoint, body] = client.post.firstCall.args;
+      assert.strictEqual(endpoint, '/me/contacts');
+      assert.strictEqual(body.givenName, 'Minimal');
+      assert.strictEqual(body.surname, undefined);
+      assert.strictEqual(body.emailAddresses, undefined);
+      assert.strictEqual(body.businessPhones, undefined);
+      assert.strictEqual(body.jobTitle, undefined);
+      assert.strictEqual(body.companyName, undefined);
+    });
+
+    it('should create contact with all fields', async () => {
+      client.post.resolves(makeResponse(sampleContact));
+
+      const allFields = {
+        givenName: 'Bob',
+        surname: 'Smith',
+        emailAddresses: [{ address: 'bob@contoso.com', name: 'Bob Smith' }],
+        businessPhones: ['+1 555 0100'],
+        jobTitle: 'Manager',
+        companyName: 'Contoso'
+      };
+      await people.createContact(allFields);
+
+      const [, body] = client.post.firstCall.args;
+      assert.strictEqual(body.givenName, 'Bob');
+      assert.strictEqual(body.surname, 'Smith');
+      assert.deepStrictEqual(body.emailAddresses, [{ address: 'bob@contoso.com', name: 'Bob Smith' }]);
+      assert.deepStrictEqual(body.businessPhones, ['+1 555 0100']);
+      assert.strictEqual(body.jobTitle, 'Manager');
+      assert.strictEqual(body.companyName, 'Contoso');
+    });
+  });
+
+  describe('updateContact – error propagation and edge cases', () => {
+    it('should propagate thrown error from client.patch', async () => {
+      client.patch.rejects(new Error('Patch failed'));
+
+      await assert.rejects(() => people.updateContact('contact-1', { jobTitle: 'Test' }), /Patch failed/);
+    });
+
+    it('should update contact with a single field', async () => {
+      client.patch.resolves(makeResponse({ ...sampleContact, jobTitle: 'Senior Director' }));
+
+      await people.updateContact('contact-1', { jobTitle: 'Senior Director' });
+
+      const [endpoint, body] = client.patch.firstCall.args;
+      assert.strictEqual(endpoint, '/me/contacts/contact-1');
+      assert.strictEqual(body.jobTitle, 'Senior Director');
+    });
+  });
+
+  describe('deleteContact – error propagation', () => {
+    it('should propagate thrown error from client.delete', async () => {
+      client.delete.rejects(new Error('Delete failed'));
+
+      await assert.rejects(() => people.deleteContact('contact-1'), /Delete failed/);
+    });
+  });
+
+  describe('getUserProfile – error propagation and edge cases', () => {
+    it('should propagate thrown error from client.get', async () => {
+      client.get.rejects(new Error('Profile not available'));
+
+      await assert.rejects(() => people.getUserProfile('user@contoso.com'), /Profile not available/);
+    });
+
+    it('should use user principal name in the endpoint', async () => {
+      client.get.resolves(makeResponse(sampleUser));
+
+      await people.getUserProfile('dave@contoso.com');
+
+      const [endpoint] = client.get.firstCall.args;
+      assert.strictEqual(endpoint, '/users/dave@contoso.com');
+    });
+  });
+
+  describe('searchUsers – error propagation and edge cases', () => {
+    it('should propagate thrown error from client.get', async () => {
+      client.get.rejects(new Error('Search failed'));
+
+      await assert.rejects(() => people.searchUsers('test'), /Search failed/);
+    });
+
+    it('should escape single quotes in query to prevent filter injection', async () => {
+      client.get.resolves(makeResponse([]));
+
+      await people.searchUsers("O'Brien");
+
+      const [, opts] = client.get.firstCall.args;
+      const filter = opts!.filter as string;
+      // Single quote should be escaped as '' in OData filter
+      assert(filter.includes("O''Brien"), `Expected escaped single quote in filter: ${filter}`);
+    });
+
+    it('should still set filter even for empty query', async () => {
+      client.get.resolves(makeResponse([]));
+
+      await people.searchUsers('');
+
+      const [, opts] = client.get.firstCall.args;
+      assert(opts!.filter !== undefined);
+      assert((opts!.filter as string).includes('startsWith'));
+    });
+  });
+
+  describe('getUserManager – error propagation', () => {
+    it('should propagate thrown error from client.get', async () => {
+      client.get.rejects(new Error('Manager endpoint error'));
+
+      await assert.rejects(() => people.getUserManager('user-1'), /Manager endpoint error/);
+    });
+
+    it('should propagate not-found when user does not exist', async () => {
+      client.get.resolves(makeErrorResponse('Resource not found', 'Request_ResourceNotFound'));
+
+      const result = await people.getUserManager('nonexistent-user');
+
+      assert.strictEqual(result.success, false);
+      assert.strictEqual(result.error!.code, 'Request_ResourceNotFound');
+    });
+  });
+
+  describe('getUserDirectReports – error propagation', () => {
+    it('should propagate thrown error from client.get', async () => {
+      client.get.rejects(new Error('DirectReports error'));
+
+      await assert.rejects(() => people.getUserDirectReports('user-1'), /DirectReports error/);
+    });
+  });
+
+  describe('getUserPhoto – error propagation', () => {
+    it('should propagate thrown error from client.get', async () => {
+      client.get.rejects(new Error('Photo error'));
+
+      await assert.rejects(() => people.getUserPhoto('user-1'), /Photo error/);
+    });
   });
 });

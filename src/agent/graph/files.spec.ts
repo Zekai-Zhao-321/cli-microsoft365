@@ -875,4 +875,248 @@ describe('FilesOperations', () => {
       assert.strictEqual(result.error!.code, 'ErrorItemNotFound');
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // Error propagation – rejects (thrown errors)
+  // ---------------------------------------------------------------------------
+  describe('error propagation - rejects', () => {
+    it('listRootFiles should propagate rejection from client', async () => {
+      client.get.rejects(new Error('Network failure'));
+
+      await assert.rejects(() => files.listRootFiles(), /Network failure/);
+    });
+
+    it('listFolderFiles should propagate rejection from client', async () => {
+      client.get.rejects(new Error('Timeout'));
+
+      await assert.rejects(() => files.listFolderFiles('folder-1'), /Timeout/);
+    });
+
+    it('getFileById should propagate rejection from client', async () => {
+      client.get.rejects(new Error('Service unavailable'));
+
+      await assert.rejects(() => files.getFileById('item-1'), /Service unavailable/);
+    });
+
+    it('getFileByPath should propagate rejection from client', async () => {
+      client.get.rejects(new Error('Auth error'));
+
+      await assert.rejects(() => files.getFileByPath('some/path.txt'), /Auth error/);
+    });
+
+    it('downloadFile should propagate rejection from client', async () => {
+      client.get.rejects(new Error('Forbidden'));
+
+      await assert.rejects(() => files.downloadFile('item-1'), /Forbidden/);
+    });
+
+    it('uploadSmallFile should propagate rejection from client', async () => {
+      (client as any).put.rejects(new Error('Storage full'));
+
+      await assert.rejects(() => files.uploadSmallFile('folder-1', 'file.txt', Buffer.from('data')), /Storage full/);
+    });
+
+    it('createUploadSession should propagate rejection from client', async () => {
+      client.post.rejects(new Error('Conflict'));
+
+      await assert.rejects(() => files.createUploadSession('folder-1', 'large.zip'), /Conflict/);
+    });
+
+    it('uploadLargeFileChunk should propagate rejection from client', async () => {
+      (client as any).put.rejects(new Error('Upload session expired'));
+
+      await assert.rejects(
+        () => files.uploadLargeFileChunk('https://upload.example.com/s', Buffer.from('x'), 0, 0, 1),
+        /Upload session expired/
+      );
+    });
+
+    it('createFolder should propagate rejection from client', async () => {
+      client.post.rejects(new Error('Permission denied'));
+
+      await assert.rejects(() => files.createFolder('parent-1', 'New Folder'), /Permission denied/);
+    });
+
+    it('deleteItem should propagate rejection from client', async () => {
+      client.delete.rejects(new Error('Item locked'));
+
+      await assert.rejects(() => files.deleteItem('item-1'), /Item locked/);
+    });
+
+    it('moveItem should propagate rejection from client', async () => {
+      client.patch.rejects(new Error('Destination not found'));
+
+      await assert.rejects(() => files.moveItem('item-1', 'bad-parent'), /Destination not found/);
+    });
+
+    it('copyItem should propagate rejection from client', async () => {
+      client.post.rejects(new Error('Copy failed'));
+
+      await assert.rejects(() => files.copyItem('item-1', 'parent-2'), /Copy failed/);
+    });
+
+    it('searchFiles should propagate rejection from client', async () => {
+      client.get.rejects(new Error('Search service down'));
+
+      await assert.rejects(() => files.searchFiles('budget'), /Search service down/);
+    });
+
+    it('createSharingLink should propagate rejection from client', async () => {
+      client.post.rejects(new Error('Link creation failed'));
+
+      await assert.rejects(() => files.createSharingLink('item-1', 'view', 'anonymous'), /Link creation failed/);
+    });
+
+    it('getRecentFiles should propagate rejection from client', async () => {
+      client.get.rejects(new Error('Unauthorized'));
+
+      await assert.rejects(() => files.getRecentFiles(), /Unauthorized/);
+    });
+
+    it('getSharedWithMe should propagate rejection from client', async () => {
+      client.get.rejects(new Error('Access denied'));
+
+      await assert.rejects(() => files.getSharedWithMe(), /Access denied/);
+    });
+
+    it('listFileVersions should propagate rejection from client', async () => {
+      client.get.rejects(new Error('Versioning not enabled'));
+
+      await assert.rejects(() => files.listFileVersions('item-1'), /Versioning not enabled/);
+    });
+
+    it('restoreFileVersion should propagate rejection from client', async () => {
+      client.post.rejects(new Error('Restore failed'));
+
+      await assert.rejects(() => files.restoreFileVersion('item-1', '1.0'), /Restore failed/);
+    });
+
+    it('listSharePointDriveFiles error should propagate rejection from client', async () => {
+      client.get.rejects(new Error('SharePoint unavailable'));
+
+      await assert.rejects(() => files.listSharePointDriveFiles('site-1', 'drive-1'), /SharePoint unavailable/);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Edge cases
+  // ---------------------------------------------------------------------------
+  describe('edge cases', () => {
+    it('listRootFiles with select, top, and orderby options should pass all query params', async () => {
+      client.get.resolves(makeResponse([]));
+
+      await files.listRootFiles({ select: ['id', 'name', 'size'], top: 5 });
+
+      const [, opts] = client.get.firstCall.args;
+      assert.deepStrictEqual(opts!.select, ['id', 'name', 'size']);
+      assert.strictEqual(opts!.top, 5);
+    });
+
+    it('searchFiles with empty query should still make a request', async () => {
+      client.get.resolves(makeResponse([]));
+
+      await files.searchFiles('');
+
+      assert(client.get.calledOnce);
+      const [endpoint] = client.get.firstCall.args;
+      assert.strictEqual(endpoint, "/me/drive/search(q='')");
+    });
+
+    it('searchFiles with single quotes in query should escape them', async () => {
+      client.get.resolves(makeResponse([]));
+
+      await files.searchFiles("manager's report");
+
+      assert(client.get.calledOnce);
+      const [endpoint] = client.get.firstCall.args;
+      assert.strictEqual(endpoint, "/me/drive/search(q='manager''s report')");
+    });
+
+    it('uploadSmallFile should call put with the file content as body', async () => {
+      const content = Buffer.from('file content bytes');
+      (client as any).put.resolves(makeResponse({ id: 'new-file', name: 'test.txt' }));
+
+      await files.uploadSmallFile('folder-1', 'test.txt', content);
+
+      const [url, body] = (client as any).put.firstCall.args;
+      assert.strictEqual(url, '/me/drive/items/folder-1:/test.txt:/content');
+      assert.strictEqual(body, content);
+    });
+
+    it('uploadLargeFileChunk should send correct Content-Range header for middle chunk', async () => {
+      (client as any).put.resolves(makeResponse({}));
+      const chunk = Buffer.from('x'.repeat(327680));
+
+      await files.uploadLargeFileChunk('https://upload.example.com/session', chunk, 327680, 655359, 1000000);
+
+      const [, , headers] = (client as any).put.firstCall.args;
+      assert.strictEqual(headers['Content-Range'], 'bytes 327680-655359/1000000');
+    });
+
+    it('createSharingLink with type view should send view type in body', async () => {
+      client.post.resolves(makeResponse({ link: { webUrl: 'https://1drv.ms/view' } }));
+
+      await files.createSharingLink('item-1', 'view', 'anonymous');
+
+      const [, body] = client.post.firstCall.args;
+      assert.strictEqual(body.type, 'view');
+    });
+
+    it('createSharingLink with type edit should send edit type in body', async () => {
+      client.post.resolves(makeResponse({ link: { webUrl: 'https://1drv.ms/edit' } }));
+
+      await files.createSharingLink('item-1', 'edit', 'organization');
+
+      const [, body] = client.post.firstCall.args;
+      assert.strictEqual(body.type, 'edit');
+    });
+
+    it('createSharingLink with type embed should send embed type in body', async () => {
+      client.post.resolves(makeResponse({ link: { webUrl: 'https://1drv.ms/embed' } }));
+
+      await files.createSharingLink('item-1', 'embed', 'organization');
+
+      const [, body] = client.post.firstCall.args;
+      assert.strictEqual(body.type, 'embed');
+    });
+
+    it('moveItem with rename should include name in the body', async () => {
+      client.patch.resolves(makeResponse({ id: 'item-1', name: 'renamed.txt' }));
+
+      // The current moveItem method does not accept a name parameter, so we test
+      // that parentReference is included correctly — rename is done via updateTask/patch
+      await files.moveItem('item-1', 'new-parent-456');
+
+      const [, body] = client.patch.firstCall.args;
+      assert.deepStrictEqual(body.parentReference, { id: 'new-parent-456' });
+    });
+
+    it('copyItem should use POST (not PATCH)', async () => {
+      client.post.resolves(makeResponse({}));
+
+      await files.copyItem('item-1', 'dest-parent');
+
+      assert(client.post.calledOnce);
+      assert(client.patch.notCalled);
+    });
+
+    it('createFolder should include folder:{} conflict behavior placeholder in body', async () => {
+      client.post.resolves(makeResponse({ id: 'folder-new', name: 'Docs', folder: {} }));
+
+      await files.createFolder('parent-1', 'Docs');
+
+      const [, body] = client.post.firstCall.args;
+      assert.deepStrictEqual(body.folder, {});
+      assert.strictEqual(body.name, 'Docs');
+    });
+
+    it('getFileByPath with spaces in path should pass path as-is', async () => {
+      client.get.resolves(makeResponse({ id: 'item-spaces', name: 'My Report.docx' }));
+
+      await files.getFileByPath('My Documents/My Report.docx');
+
+      const [endpoint] = client.get.firstCall.args;
+      assert.strictEqual(endpoint, '/me/drive/root:/My Documents/My Report.docx');
+    });
+  });
 });

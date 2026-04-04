@@ -288,6 +288,27 @@ describe('MailOperations', () => {
 
       assert.strictEqual(result.success, false);
     });
+
+    it('should still make the request when to array is empty', async () => {
+      client.post.resolves(makeResponse(undefined));
+
+      await mail.sendMail({ to: [], subject: 'S', body: 'B' });
+
+      assert(client.post.calledOnce);
+      const [endpoint, body] = client.post.firstCall.args;
+      assert.strictEqual(endpoint, '/me/sendMail');
+      assert.deepStrictEqual(body.message.toRecipients, []);
+    });
+
+    it('should still send when subject is an empty string', async () => {
+      client.post.resolves(makeResponse(undefined));
+
+      await mail.sendMail({ to: ['user@test.com'], subject: '', body: 'B' });
+
+      assert(client.post.calledOnce);
+      const [, body] = client.post.firstCall.args;
+      assert.strictEqual(body.message.subject, '');
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -682,6 +703,18 @@ describe('MailOperations', () => {
 
       assert.strictEqual(result.success, false);
     });
+
+    it('should still make the request when query is empty string', async () => {
+      client.post.resolves(makeResponse({
+        value: [{ hitsContainers: [{ hits: [], total: 0, moreResultsAvailable: false }] }]
+      }));
+
+      await mail.searchMail('');
+
+      assert(client.post.calledOnce);
+      const [, body] = client.post.firstCall.args;
+      assert.strictEqual(body.requests[0].query.queryString, '');
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -828,6 +861,15 @@ describe('MailOperations', () => {
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.data.id, 'att-1');
     });
+
+    it('should propagate not-found error when attachment does not exist', async () => {
+      client.get.resolves(makeErrorResponse('Item not found', 'ErrorItemNotFound'));
+
+      const result = await mail.getAttachment('msg-1', 'nonexistent-att');
+
+      assert.strictEqual(result.success, false);
+      assert.strictEqual(result.error!.code, 'ErrorItemNotFound');
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -862,6 +904,15 @@ describe('MailOperations', () => {
 
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.data.id, 'att-1');
+    });
+
+    it('should propagate error when attachment upload fails', async () => {
+      client.post.resolves(makeErrorResponse('Maximum attachment size exceeded', 'ErrorAttachmentSizeShouldNotBeLargerThanAllowedLimit'));
+
+      const result = await mail.addAttachment('msg-1', { name: 'huge.bin', contentBytes: 'AAAA' });
+
+      assert.strictEqual(result.success, false);
+      assert(result.error !== undefined);
     });
   });
 
@@ -918,6 +969,32 @@ describe('MailOperations', () => {
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.data.moved, 3);
     });
+
+    it('should propagate error when batch request fails', async () => {
+      client.post.resolves(makeErrorResponse('Bad request', 'BadRequest'));
+
+      const result = await mail.bulkMove(['msg-1', 'msg-2'], 'archive');
+
+      assert.strictEqual(result.success, false);
+      assert(result.error !== undefined);
+    });
+
+    it('should use responses length for moved count when responses present', async () => {
+      client.post.resolves(makeResponse({
+        responses: [
+          { id: '0', status: 201 },
+          { id: '1', status: 201 },
+          { id: '2', status: 201 },
+          { id: '3', status: 201 },
+          { id: '4', status: 201 }
+        ]
+      }));
+
+      const result = await mail.bulkMove(['m1', 'm2', 'm3', 'm4', 'm5'], 'inbox');
+
+      assert.strictEqual(result.success, true);
+      assert.strictEqual(result.data.moved, 5);
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -959,6 +1036,15 @@ describe('MailOperations', () => {
 
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.data.updated, 2);
+    });
+
+    it('should propagate error when batch fails', async () => {
+      client.post.resolves(makeErrorResponse('Unauthorized', 'InvalidAuthenticationToken'));
+
+      const result = await mail.bulkMarkRead(['msg-1']);
+
+      assert.strictEqual(result.success, false);
+      assert(result.error !== undefined);
     });
   });
 
@@ -1013,6 +1099,15 @@ describe('MailOperations', () => {
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.data.deleted, 2);
     });
+
+    it('should propagate error when batch delete fails', async () => {
+      client.post.resolves(makeErrorResponse('Forbidden', 'AccessDenied'));
+
+      const result = await mail.bulkDelete(['msg-1']);
+
+      assert.strictEqual(result.success, false);
+      assert(result.error !== undefined);
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -1040,6 +1135,15 @@ describe('MailOperations', () => {
 
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.data.length, 2);
+    });
+
+    it('should return empty array when no rules exist', async () => {
+      client.get.resolves(makeResponse([]));
+
+      const result = await mail.listRules();
+
+      assert.strictEqual(result.success, true);
+      assert.deepStrictEqual(result.data, []);
     });
   });
 
@@ -1106,6 +1210,15 @@ describe('MailOperations', () => {
 
       assert.strictEqual(result.success, true);
     });
+
+    it('should propagate not-found error when rule does not exist', async () => {
+      client.delete.resolves(makeErrorResponse('Item not found', 'ErrorItemNotFound'));
+
+      const result = await mail.deleteRule('nonexistent-rule');
+
+      assert.strictEqual(result.success, false);
+      assert.strictEqual(result.error!.code, 'ErrorItemNotFound');
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -1133,6 +1246,15 @@ describe('MailOperations', () => {
 
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.data.length, 2);
+    });
+
+    it('should return empty array when no categories exist', async () => {
+      client.get.resolves(makeResponse([]));
+
+      const result = await mail.listCategories();
+
+      assert.strictEqual(result.success, true);
+      assert.deepStrictEqual(result.data, []);
     });
   });
 

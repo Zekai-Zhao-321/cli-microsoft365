@@ -159,4 +159,75 @@ describe(commands.SEARCH, () => {
     assert(Array.isArray(result));
     assert(result.length > 0);
   });
+
+  it('search with special regex characters in query does not crash', async () => {
+    // "file.ts" contains a dot which is a special regex character
+    await command.action(logger, { options: { query: 'file.ts' } });
+    assert(loggerLogSpy.calledOnce);
+    const result = loggerLogSpy.firstCall.args[0];
+    assert(Array.isArray(result));
+  });
+
+  it('search with query containing square brackets does not crash', async () => {
+    await command.action(logger, { options: { query: 'list[inbox]' } });
+    assert(loggerLogSpy.calledOnce);
+    const result = loggerLogSpy.firstCall.args[0];
+    assert(Array.isArray(result));
+  });
+
+  it('returns all operations when no query provided', async () => {
+    await command.action(logger, { options: {} });
+    const result = loggerLogSpy.firstCall.args[0];
+    assert(Array.isArray(result));
+    assert(result.length > 0);
+  });
+
+  it('each operation entry has a description field', async () => {
+    await command.action(logger, { options: {} });
+    const result = loggerLogSpy.firstCall.args[0];
+    for (const entry of result) {
+      assert(typeof entry.description === 'string', `Entry ${entry.operation} missing description`);
+      assert(entry.description.length > 0, `Entry ${entry.operation} has empty description`);
+    }
+  });
+
+  it('each operation entry includes the module name', async () => {
+    await command.action(logger, { options: {} });
+    const result = loggerLogSpy.firstCall.args[0];
+    for (const entry of result) {
+      assert(typeof entry.module === 'string', `Entry ${entry.operation} missing module name`);
+      assert(entry.module.length > 0, `Entry ${entry.operation} has empty module name`);
+    }
+  });
+
+  it('search result includes module name in each entry when filtering by query', async () => {
+    await command.action(logger, { options: { query: 'list' } });
+    const result = loggerLogSpy.firstCall.args[0];
+    assert(Array.isArray(result));
+    assert(result.length > 0);
+    for (const entry of result) {
+      assert(typeof entry.module === 'string');
+      assert(typeof entry.operation === 'string');
+    }
+  });
+
+  it('people module operations are included in results', async () => {
+    await command.action(logger, { options: { module: 'people' } });
+    const result = loggerLogSpy.firstCall.args[0];
+    assert(Array.isArray(result));
+    assert(result.length > 0);
+    for (const entry of result) {
+      assert.strictEqual(entry.module, 'people');
+    }
+  });
+
+  it('filters operations by query matching module name', async () => {
+    await command.action(logger, { options: { query: 'calendar' } });
+    const result = loggerLogSpy.firstCall.args[0];
+    assert(Array.isArray(result));
+    assert(result.length > 0);
+    // At least some entries should be from the calendar module
+    const hasCalendar = result.some((op: any) => op.module === 'calendar');
+    assert(hasCalendar);
+  });
 });

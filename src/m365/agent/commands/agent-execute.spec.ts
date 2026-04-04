@@ -190,4 +190,106 @@ describe(commands.EXECUTE, () => {
     });
     assert(loggerLogSpy.calledOnce);
   });
+
+  it('executes people listRelevantPeople and logs result', async () => {
+    sinon.stub(request, 'get').callsFake(async (opts) => {
+      if ((opts.url as string).indexOf('/me/people') > -1) {
+        return { value: [{ id: 'p-1', displayName: 'Alice' }] };
+      }
+      throw 'Invalid request: ' + opts.url;
+    });
+
+    await command.action(logger, { options: { module: 'people', operation: 'listRelevantPeople' } });
+    assert(loggerLogSpy.calledOnce);
+    const result = loggerLogSpy.firstCall.args[0];
+    assert.strictEqual(result.success, true);
+  });
+
+  it('executes operation that returns empty array and formats as empty', async () => {
+    sinon.stub(request, 'get').callsFake(async () => {
+      return { value: [] };
+    });
+
+    await command.action(logger, { options: { module: 'mail', operation: 'listInbox' } });
+    assert(loggerLogSpy.calledOnce);
+    const result = loggerLogSpy.firstCall.args[0];
+    assert.strictEqual(result.success, true);
+    assert(Array.isArray(result.data));
+    assert.strictEqual(result.data.length, 0);
+  });
+
+  it('fails validation if maxTokens is zero', async () => {
+    const actual = await command.validate({ options: { module: 'mail', operation: 'listInbox', maxTokens: 0 } }, commandInfo);
+    assert.notStrictEqual(actual, true);
+  });
+
+  it('passes validation if maxTokens is a positive number', async () => {
+    const actual = await command.validate({ options: { module: 'mail', operation: 'listInbox', maxTokens: 500 } }, commandInfo);
+    assert.strictEqual(actual, true);
+  });
+
+  it('fails validation if maxTokens is not a number', async () => {
+    const actual = await command.validate({ options: { module: 'mail', operation: 'listInbox', maxTokens: 'abc' as any } }, commandInfo);
+    assert.notStrictEqual(actual, true);
+  });
+
+  it('handles operation error response with error code', async () => {
+    sinon.stub(request, 'get').rejects({
+      error: {
+        error: {
+          code: 'Forbidden',
+          message: 'Access is denied.'
+        }
+      }
+    });
+
+    try {
+      await command.action(logger, {
+        options: {
+          module: 'mail',
+          operation: 'listInbox'
+        }
+      });
+      assert.fail('Expected error was not thrown');
+    }
+    catch (err: any) {
+      assert(err instanceof CommandError);
+    }
+  });
+
+  it('passes params as a non-array object wrapped in array', async () => {
+    sinon.stub(request, 'get').callsFake(async (opts) => {
+      if ((opts.url as string).indexOf('/me/messages/') > -1) {
+        return { id: 'msg-obj', subject: 'Object Param' };
+      }
+      throw 'Invalid request: ' + opts.url;
+    });
+
+    await command.action(logger, {
+      options: {
+        module: 'mail',
+        operation: 'getMessage',
+        params: '"msg-obj"'
+      }
+    });
+    assert(loggerLogSpy.calledOnce);
+    const result = loggerLogSpy.firstCall.args[0];
+    assert.strictEqual(result.success, true);
+  });
+
+  it('throws error for unknown operation on search module', async () => {
+    try {
+      await command.action(logger, {
+        options: {
+          module: 'search',
+          operation: 'nonExistentSearchOp'
+        }
+      });
+      assert.fail('Expected error was not thrown');
+    }
+    catch (err: any) {
+      assert(err instanceof CommandError);
+      assert(err.message.indexOf('nonExistentSearchOp') > -1);
+    }
+  });
 });

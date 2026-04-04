@@ -120,4 +120,64 @@ describe(commands.STATUS, () => {
     const result = loggerLogSpy.firstCall.args[0];
     assert.strictEqual(result.identityName, undefined);
   });
+
+  it('totalOperations is a positive number', async () => {
+    auth.connection.active = true;
+
+    await command.action(logger, { options: {} });
+    const result = loggerLogSpy.firstCall.args[0];
+    assert(typeof result.totalOperations === 'number');
+    assert(result.totalOperations > 0, 'totalOperations should be positive');
+  });
+
+  it('each module shows name and operationCount fields', async () => {
+    auth.connection.active = true;
+
+    await command.action(logger, { options: {} });
+    const result = loggerLogSpy.firstCall.args[0];
+    for (const mod of result.modules) {
+      assert(typeof mod.name === 'string', 'module should have a name string');
+      assert(mod.name.length > 0, 'module name should not be empty');
+      assert(typeof mod.operationCount === 'number', 'module should have operationCount number');
+    }
+  });
+
+  it('module list contains all expected module names', async () => {
+    auth.connection.active = true;
+
+    await command.action(logger, { options: {} });
+    const result = loggerLogSpy.firstCall.args[0];
+    const moduleNames: string[] = result.modules.map((m: any) => m.name);
+    const expectedModules = ['mail', 'calendar', 'teams', 'files', 'tasks', 'people', 'search'];
+    for (const expected of expectedModules) {
+      assert(moduleNames.includes(expected), `Module '${expected}' should be present in status`);
+    }
+  });
+
+  it('shows disconnected status and no identityName when auth is inactive', async () => {
+    auth.connection.active = false;
+    auth.connection.identityName = undefined;
+
+    await command.action(logger, { options: {} });
+    const result = loggerLogSpy.firstCall.args[0];
+    assert.strictEqual(result.connected, false);
+    assert.strictEqual(result.identityName, undefined);
+  });
+
+  it('includes modules array even when disconnected', async () => {
+    auth.connection.active = false;
+
+    await command.action(logger, { options: {} });
+    const result = loggerLogSpy.firstCall.args[0];
+    assert(Array.isArray(result.modules));
+    assert(result.modules.length > 0);
+  });
+
+  it('status includes connected field', async () => {
+    auth.connection.active = true;
+
+    await command.action(logger, { options: {} });
+    const result = loggerLogSpy.firstCall.args[0];
+    assert('connected' in result, 'result should have connected field');
+  });
 });
