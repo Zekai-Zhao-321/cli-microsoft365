@@ -50,7 +50,7 @@ class AgentExecuteCommand extends GraphCommand {
         autocomplete: [...MODULE_NAMES]
       },
       {
-        option: '-o, --operation <operation>'
+        option: '--operation <operation>'
       },
       {
         option: '-p, --params [params]'
